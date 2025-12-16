@@ -1,0 +1,1217 @@
+﻿<template>
+  <div class="whiteboard-container">
+    <!-- 工具�?-->
+    <div class="toolbar">
+      <div class="toolbar-section">
+        <el-button-group>
+          <el-button 
+            :type="currentTool === 'select' ? 'primary' : 'default'"
+            @click="setTool('select')"
+            :icon="Pointer"
+            title="选择工具 (V)"
+          >
+            选择 (V)
+          </el-button>
+          <el-dropdown 
+            @command="handlePenStyleChange" 
+            trigger="click"
+            placement="bottom-start"
+            :hide-on-click="true"
+          >
+            <el-button 
+              :type="currentTool === 'pen' ? 'primary' : 'default'"
+              @click="setTool('pen')"
+              :icon="EditPen"
+              title="画笔工具 (P)"
+            >
+              画笔 (P) <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="solid" :class="{ 'is-active': currentPenStyle === 'solid' }">
+                  <Icon icon="mdi:minus" class="dropdown-icon" />
+                  实线
+                </el-dropdown-item>
+                <el-dropdown-item command="dashed" :class="{ 'is-active': currentPenStyle === 'dashed' }">
+                  <Icon icon="mdi:minus" class="dropdown-icon" />
+                  虚线
+                </el-dropdown-item>
+                <el-dropdown-item command="dotted" :class="{ 'is-active': currentPenStyle === 'dotted' }">
+                  <Icon icon="mdi:dots-horizontal" class="dropdown-icon" />
+                  点线
+                </el-dropdown-item>
+                <el-dropdown-item command="dash-dot" :class="{ 'is-active': currentPenStyle === 'dash-dot' }">
+                  <Icon icon="mdi:minus" class="dropdown-icon" />
+                  点划�?                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown 
+            @command="handleShapeTypeChange" 
+            trigger="click"
+            placement="bottom-start"
+            :hide-on-click="true"
+          >
+            <el-button 
+              :type="currentTool === 'shape' ? 'primary' : 'default'"
+              @click="setTool('shape')"
+              :icon="Grid"
+              title="形状工具 (R)"
+            >
+              形状 (R) <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="rectangle" :class="{ 'is-active': currentShapeType === 'rectangle' }">
+                  <Icon icon="mdi:rectangle" class="dropdown-icon" />
+                  矩形
+                </el-dropdown-item>
+                <el-dropdown-item command="circle" :class="{ 'is-active': currentShapeType === 'circle' }">
+                  <Icon icon="mdi:circle" class="dropdown-icon" />
+                  圆形
+                </el-dropdown-item>
+                <el-dropdown-item command="triangle" :class="{ 'is-active': currentShapeType === 'triangle' }">
+                  <Icon icon="mdi:triangle" class="dropdown-icon" />
+                  三角�?                </el-dropdown-item>
+                <el-dropdown-item command="ellipse" :class="{ 'is-active': currentShapeType === 'ellipse' }">
+                  <Icon icon="mdi:ellipse" class="dropdown-icon" />
+                  椭圆
+                </el-dropdown-item>
+                <el-dropdown-item command="diamond" :class="{ 'is-active': currentShapeType === 'diamond' }">
+                  <Icon icon="mdi:diamond" class="dropdown-icon" />
+                  菱形
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button 
+            :type="currentTool === 'text' ? 'primary' : 'default'"
+            @click="setTool('text')"
+            :icon="Document"
+            title="文本工具 (T)"
+          >
+            文本 (T)
+          </el-button>
+          <el-dropdown 
+            @command="handleArrowTypeChange" 
+            trigger="click"
+            placement="bottom-start"
+            :hide-on-click="true"
+          >
+            <el-button 
+              :type="currentTool === 'arrow' ? 'primary' : 'default'"
+              @click="setTool('arrow')"
+              :icon="ArrowRight"
+              title="箭头工具 (A)"
+            >
+              箭头 (A) <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="line" :class="{ 'is-active': currentArrowType === 'line' }">
+                  <Icon icon="mdi:arrow-right" class="dropdown-icon" />
+                  直线箭头
+                </el-dropdown-item>
+                <el-dropdown-item command="curve" :class="{ 'is-active': currentArrowType === 'curve' }">
+                  <Icon icon="mdi:arrow-right-bold" class="dropdown-icon" />
+                  曲线箭头
+                </el-dropdown-item>
+                <el-dropdown-item command="bidirectional" :class="{ 'is-active': currentArrowType === 'bidirectional' }">
+                  <Icon icon="mdi:arrow-left-right" class="dropdown-icon" />
+                  双向箭头
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-dropdown 
+            @command="handleLineTypeChange"
+            trigger="click"
+            placement="bottom-start"
+            :hide-on-click="true"
+          >
+            <el-button 
+              :type="currentTool === 'line' ? 'primary' : 'default'"
+              @click="setTool('line')"
+              :icon="Minus"
+              title="线条工具 (L)"
+            >
+              线条 (L) <el-icon class="el-icon--right"><arrow-down /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="straight" :class="{ 'is-active': currentLineType === 'straight' }">
+                  <Icon icon="mdi:minus" class="dropdown-icon" />
+                  直线
+                </el-dropdown-item>
+                <el-dropdown-item command="curve" :class="{ 'is-active': currentLineType === 'curve' }">
+                  <Icon icon="mdi:chart-line" class="dropdown-icon" />
+                  曲线
+                </el-dropdown-item>
+                <el-dropdown-item command="free" :class="{ 'is-active': currentLineType === 'free' }">
+                  <Icon icon="mdi:draw" class="dropdown-icon" />
+                  自由线条
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </el-button-group>
+      </div>
+
+      <div class="toolbar-section">
+        <el-button-group>
+          <el-button @click="zoomOut" :icon="ZoomOut">缩小</el-button>
+          <el-button @click="resetZoom">100%</el-button>
+          <el-button @click="zoomIn" :icon="ZoomIn">放大</el-button>
+        </el-button-group>
+      </div>
+
+
+      <div class="toolbar-section">
+        <el-button-group>
+          <el-button @click="undo" :disabled="!canUndo" :icon="RefreshLeft">撤销</el-button>
+          <el-button @click="redo" :disabled="!canRedo" :icon="RefreshRight">重做</el-button>
+        </el-button-group>
+      </div>
+
+      <div class="toolbar-section">
+        <el-button @click="addTestElement" type="success">添加测试元素</el-button>
+        <el-button @click="clearCanvas" type="danger">清空画布</el-button>
+        <el-button @click="showHelp" :icon="QuestionFilled" title="显示帮助">帮助</el-button>
+      </div>
+    </div>
+
+    <!-- 画布区域 -->
+    <div class="canvas-container" ref="canvasContainer">
+      <canvas 
+        ref="canvasRef" 
+        class="whiteboard-canvas"
+      ></canvas>
+      
+      <!-- 浮动样式工具�?-->
+      <FloatingStyleToolbar
+        ref="floatingToolbarRef"
+        :visible="showFloatingToolbar"
+        :selected-element="selectedElement"
+        :position="floatingToolbarPosition"
+        :tool-type="currentTool as ToolbarToolType"
+        @update:style="updateElementStyle"
+        @style-brush="activateStyleBrush"
+        @bring-to-front="bringElementToFront"
+        @send-to-back="sendElementToBack"
+      />
+    </div>
+
+    <!-- 样式面板 -->
+    <StylePanel 
+      v-model="currentStyle"
+      @update:modelValue="updateCurrentStyle"
+    />
+
+    <!-- 状态栏 -->
+    <div class="status-bar">
+      <span>缩放: {{ Math.round(viewport.scale * 100) }}%</span>
+      <span>元素数量: {{ elements.length }}</span>
+      <span>选中: {{ selectedElementIds.length }}</span>
+      <span>工具: {{ getToolName(currentTool) }}</span>
+      <span>视口偏移: ({{ Math.round(viewport.offset.x) }}, {{ Math.round(viewport.offset.y) }})</span>
+    </div>
+
+    <!-- 帮助对话�?-->
+    <el-dialog v-model="helpVisible" title="操作帮助" width="600px">
+      <div class="help-content">
+        <h3>快捷�?</h3>
+        <ul>
+          <li><kbd>V</kbd> - 选择工具</li>
+          <li><kbd>P</kbd> - 画笔工具</li>
+          <li><kbd>R</kbd> - 形状工具</li>
+          <li><kbd>T</kbd> - 文本工具</li>
+          <li><kbd>A</kbd> - 箭头工具</li>
+          <li><kbd>L</kbd> - 线条工具</li>
+          <li><kbd>E</kbd> - 橡皮擦工�?</li>
+          <li><kbd>Ctrl + +</kbd> - 放大</li>
+          <li><kbd>Ctrl + -</kbd> - 缩小</li>
+          <li><kbd>Ctrl + 0</kbd> - 重置缩放</li>
+          <li><kbd>Delete</kbd> - 删除选中元素</li>
+          <li><kbd>Ctrl + A</kbd> - 全�?</li>
+          <li><kbd>Escape</kbd> - 取消当前操作</li>
+        </ul>
+
+        <h3>操作提示</h3>
+        <ul>
+          <li>按住 <kbd>Shift</kbd> 绘制圆形或正方形</li>
+          <li>按住 <kbd>Shift + Enter</kbd> 在文本中换行</li>
+          <li>拖拽空白区域进行框�?</li>
+          <li>双击元素进行编辑</li>
+          <li>使用鼠标滚轮缩放画布</li>
+          <li>拖拽画布进行平移</li>
+        </ul>
+
+        <h3>手势操作</h3>
+        <ul>
+          <li>双指缩放 - 放大/缩小画布</li>
+          <li>双指旋转 - 旋转画布（如果支持）</li>
+          <li>单指拖拽 - 平移画布</li>
+        </ul>
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, onMounted, onUnmounted, nextTick, toRefs } from 'vue'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { CanvasEngine } from '@/core/canvas/CanvasEngine'
+import { QuestionFilled } from '@element-plus/icons-vue'
+import { ElementType, ToolType } from '@/types/canvas.types'
+import { ToolType as ToolbarToolType } from '@/types/toolbar.types'
+import { 
+  Pointer, 
+  EditPen, 
+  Grid, 
+  Document, 
+  ArrowRight,
+  ArrowDown,
+  Minus,
+  Connection,
+  Switch,
+  ZoomIn, 
+  ZoomOut, 
+  RefreshLeft, 
+  RefreshRight,
+  Circle,
+  CirclePlus,
+  Star,
+  Plus
+} from '@element-plus/icons-vue'
+import { Icon } from '@iconify/vue'
+import ColorPicker from './ColorPicker.vue'
+import StylePanel from './StylePanel.vue'
+import FloatingStyleToolbar from './FloatingStyleToolbar.vue'
+
+// 组件引用
+const canvasRef = ref<HTMLCanvasElement>()
+const floatingToolbarRef = ref<InstanceType<typeof FloatingStyleToolbar>>()
+const canvasContainer = ref<HTMLElement>()
+
+// 当前工具类型状�?const currentArrowType = ref('line')
+const currentLineType = ref('straight')
+const currentShapeType = ref('rectangle')
+const currentPenStyle = ref('solid')
+
+// 浮动工具栏状�?const showFloatingToolbar = ref(false)
+const selectedElement = ref<any>(null)
+const floatingToolbarPosition = ref({ x: 0, y: 0 })
+const isDrawing = ref(false) // 标记是否正在绘制
+
+// 颜色和样式状�?const currentFillColor = ref('#ffffff')
+const currentStrokeColor = ref('#000000')
+const currentTextColor = ref('#000000')
+const currentStyle = reactive({
+  strokeWidth: 2,
+  lineStyle: 'solid',
+  lineCap: 'round',
+  fill: '#ffffff',
+  fillEnabled: true,
+  fillType: 'solid',
+  gradientDirection: 'horizontal',
+  fontSize: 16,
+  fontFamily: 'Arial',
+  textAlign: 'left',
+  textDecoration: 'none'
+})
+
+// 状态管�?const canvasStore = useCanvasStore()
+const {
+  viewport,
+  elements,
+  selectedElementIds,
+  canUndo,
+  canRedo,
+  setCurrentTool,
+  updateViewport,
+  zoomTo,
+  resetViewport,
+  addElement,
+  clearElements,
+  undo,
+  redo,
+  createTestElement
+} = canvasStore
+
+// 使用toRefs确保响应�?const { currentTool } = toRefs(canvasStore)
+
+// 画布引擎
+let canvasEngine: CanvasEngine | null = null
+
+// 帮助对话框状�?const helpVisible = ref(false)
+
+// 初始化画�?onMounted(async () => {
+  await nextTick()
+  
+  if (canvasRef.value && canvasContainer.value) {
+    // 先设置画布尺�?    updateCanvasSize()
+    
+    // 创建画布引擎
+    canvasEngine = new CanvasEngine(canvasRef.value, {
+      gridSize: 20,
+      gridVisible: true,
+      rulersVisible: true,
+      backgroundColor: '#f8f9fa'
+    })
+    
+    // 设置工具变化回调
+    canvasEngine.getToolManager().setOnToolChange((toolType) => {
+
+      // 同步更新Vue组件的工具状�?      setCurrentTool(toolType)
+      
+      // 工具切换时不设置绘制状态，只有实际开始绘制时才设�?      // isDrawing.value = ['pen', 'shape', 'arrow', 'line'].includes(toolType)
+    })
+    
+    // 设置绘制状态变化回�?    canvasEngine.setOnDrawingStateChange((drawing) => {
+
+      isDrawing.value = drawing
+    })
+    
+    // 设置元素创建回调
+    canvasEngine.setOnElementCreated((element) => {
+
+
+
+      // 自动选择新创建的元素并显示浮动工具栏
+      selectElement(element)
+    })
+
+    // 设置样式刷重置回�?    canvasEngine.setOnStyleBrushReset(() => {
+
+      resetStyleBrush()
+    })
+
+    // 设置选择变化回调
+    canvasEngine.setOnSelectionChange((elements) => {
+
+        count: elements.length,
+        elementIds: elements.map(el => el.id)
+      })
+      
+      // 更新选中元素状�?      if (elements.length > 0) {
+        selectedElement.value = elements[0] // 选择第一个元素作为主要选择
+        showFloatingToolbar.value = true
+      } else {
+        selectedElement.value = null
+        showFloatingToolbar.value = false
+      }
+    })
+    
+    // 添加元素选择监听
+    setupElementSelectionListener()
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', updateCanvasSize)
+    
+    // 添加键盘事件监听
+    window.addEventListener('keydown', handleKeyDown)
+    
+    // 注释掉自动添加测试元素，避免页面刷新时出现测试矩�?    // addTestElements()
+  }
+})
+
+// 清理资源
+onUnmounted(() => {
+  if (canvasEngine) {
+    canvasEngine.destroy()
+  }
+  window.removeEventListener('resize', updateCanvasSize)
+  window.removeEventListener('keydown', handleKeyDown)
+})
+
+// 更新画布尺寸
+const updateCanvasSize = () => {
+  if (canvasContainer.value && canvasRef.value) {
+    const rect = canvasContainer.value.getBoundingClientRect()
+    
+    // 设置画布的实际像素尺�?    canvasRef.value.width = rect.width
+    canvasRef.value.height = rect.height
+    
+    // 设置画布的CSS尺寸
+    canvasRef.value.style.width = rect.width + 'px'
+    canvasRef.value.style.height = rect.height + 'px'
+    
+    // 更新视口尺寸
+    updateViewport({
+      width: rect.width,
+      height: rect.height
+    })
+    
+    // 通知画布引擎更新尺寸
+    if (canvasEngine) {
+      canvasEngine.getRenderer().updateCanvasSize()
+    }
+  }
+}
+
+// 工具操作
+const setTool = (tool: string) => {
+
+  setCurrentTool(tool as any)
+  
+  // 更新画布引擎的工�?  if (canvasEngine) {
+    canvasEngine.setCurrentTool(tool as any)
+  }
+  
+  // 同步工具类型状�?  if (tool === 'arrow') {
+    // 确保箭头工具使用当前选择的类�?    if (canvasEngine) {
+      const arrowTool = canvasEngine.getToolManager().getTool('arrow') as any
+      if (arrowTool) {
+        arrowTool.setArrowType(currentArrowType.value)
+      }
+    }
+  } else if (tool === 'line') {
+    // 确保线条工具使用当前选择的类�?    if (canvasEngine) {
+      const lineTool = canvasEngine.getToolManager().getTool('line') as any
+      if (lineTool) {
+        lineTool.setLineType(currentLineType.value)
+      }
+    }
+  } else if (tool === 'shape') {
+    // 确保形状工具使用当前选择的类�?    if (canvasEngine) {
+      const shapeTool = canvasEngine.getToolManager().getTool('shape') as any
+      if (shapeTool) {
+        shapeTool.setShapeType(currentShapeType.value)
+      }
+    }
+  } else if (tool === 'pen') {
+    // 确保画笔工具使用当前选择的样�?    if (canvasEngine) {
+      const penTool = canvasEngine.getToolManager().getTool('pen') as any
+      if (penTool) {
+        penTool.setLineStyle(currentPenStyle.value as any)
+      }
+    }
+  }
+  
+  // 更新画布光标样式
+  if (canvasRef.value) {
+    switch (tool) {
+      case 'select':
+        canvasRef.value.style.cursor = 'default'
+        break
+      case 'pen':
+        canvasRef.value.style.cursor = 'crosshair'
+        break
+      case 'shape':
+        canvasRef.value.style.cursor = 'crosshair'
+        break
+      case 'text':
+        canvasRef.value.style.cursor = 'text'
+        break
+      case 'arrow':
+        canvasRef.value.style.cursor = 'crosshair'
+        break
+      case 'line':
+        canvasRef.value.style.cursor = 'crosshair'
+        break
+      case 'eraser':
+        canvasRef.value.style.cursor = 'grab'
+        break
+      default:
+        canvasRef.value.style.cursor = 'default'
+    }
+  }
+}
+
+const getToolName = (tool: string) => {
+  const toolNames: Record<string, string> = {
+    select: '选择',
+    pen: '画笔',
+    shape: '形状',
+    text: '文本',
+    arrow: '箭头',
+    line: '线条',
+    eraser: '橡皮�?
+  }
+  return toolNames[tool] || tool
+}
+
+// 处理箭头类型切换
+const handleArrowTypeChange = (command: string) => {
+
+  currentArrowType.value = command
+  
+  // 如果当前工具是箭头工具，立即应用新类�?  if (currentTool.value === 'arrow' && canvasEngine) {
+    const arrowTool = canvasEngine.getToolManager().getTool('arrow') as any
+    if (arrowTool) {
+      switch (command) {
+        case 'line':
+          arrowTool.setArrowType('line')
+          break
+        case 'curve':
+          arrowTool.setArrowType('curve')
+          break
+        case 'bidirectional':
+          arrowTool.setArrowType('bidirectional')
+          break
+      }
+    }
+  }
+}
+
+// 处理线条类型切换
+const handleLineTypeChange = (command: string) => {
+
+  currentLineType.value = command
+  
+  // 如果当前工具是线条工具，立即应用新类�?  if (currentTool.value === 'line' && canvasEngine) {
+    const lineTool = canvasEngine.getToolManager().getTool('line') as any
+    if (lineTool) {
+      switch (command) {
+        case 'straight':
+          lineTool.setLineType('straight')
+          break
+        case 'curve':
+          lineTool.setLineType('curve')
+          break
+        case 'free':
+          lineTool.setLineType('free')
+          break
+      }
+    }
+  }
+}
+
+// 处理形状类型切换
+const handleShapeTypeChange = (command: string) => {
+
+  currentShapeType.value = command
+  
+  // 如果当前工具是形状工具，立即应用新类�?  if (currentTool.value === 'shape' && canvasEngine) {
+    const shapeTool = canvasEngine.getToolManager().getTool('shape') as any
+    if (shapeTool) {
+      switch (command) {
+        case 'rectangle':
+          shapeTool.setShapeType('rectangle')
+          break
+        case 'circle':
+          shapeTool.setShapeType('circle')
+          break
+        case 'triangle':
+          shapeTool.setShapeType('triangle')
+          break
+        case 'ellipse':
+          shapeTool.setShapeType('ellipse')
+          break
+        case 'diamond':
+          shapeTool.setShapeType('diamond')
+          break
+      }
+    }
+  }
+}
+
+// 处理画笔样式切换
+const handlePenStyleChange = (command: string) => {
+
+  currentPenStyle.value = command
+  
+  // 如果当前工具是画笔工具，立即应用新样�?  if (currentTool.value === 'pen' && canvasEngine) {
+    const penTool = canvasEngine.getToolManager().getTool('pen') as any
+    if (penTool) {
+      penTool.setLineStyle(command as any)
+    }
+  }
+}
+
+// 颜色更新方法
+const updateFillColor = (color: string) => {
+
+  currentFillColor.value = color
+  currentStyle.fill = color
+  // 通知画布引擎更新当前样式
+  if (canvasEngine) {
+    canvasEngine.updateCurrentStyle({ fill: color })
+  }
+}
+
+const updateStrokeColor = (color: string) => {
+
+  currentStrokeColor.value = color
+  currentStyle.stroke = color
+  // 通知画布引擎更新当前样式
+  if (canvasEngine) {
+    canvasEngine.updateCurrentStyle({ stroke: color })
+  }
+}
+
+const updateTextColor = (color: string) => {
+
+  currentTextColor.value = color
+  currentStyle.fill = color
+  // 通知画布引擎更新当前样式
+  if (canvasEngine) {
+    canvasEngine.updateCurrentStyle({ fill: color })
+  }
+}
+
+// 样式更新方法
+const updateCurrentStyle = (style: any) => {
+
+  Object.assign(currentStyle, style)
+  // 通知画布引擎更新当前样式
+  if (canvasEngine) {
+    canvasEngine.updateCurrentStyle(style)
+  }
+}
+
+// 设置元素选择监听
+const setupElementSelectionListener = () => {
+  if (!canvasEngine) return
+  
+  // 监听画布点击事件
+  const canvas = canvasRef.value
+  if (canvas) {
+    canvas.addEventListener('click', handleCanvasClick)
+    canvas.addEventListener('dblclick', handleCanvasDoubleClick)
+
+  }
+}
+
+// 处理画布点击事件
+const handleCanvasClick = (event: MouseEvent) => {
+
+
+
+  
+  if (!canvasEngine) {
+
+    return
+  }
+  
+  // 如果正在绘制，跳过元素选择
+  if (isDrawing.value) {
+
+    return
+  }
+  
+  // 如果是选择工具，让SelectTool处理点击事件
+  if (currentTool.value === 'select') {
+
+    return // 不在这里处理，让SelectTool处理
+  }
+  
+  // 获取点击位置
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect) {
+
+    return
+  }
+  
+  const clickX = event.clientX - rect.left
+  const clickY = event.clientY - rect.top
+  
+
+
+  
+  // 检查是否点击了元素
+  const elements = canvasEngine.getElements()
+
+  
+  // 从后往前遍历，找到最上层的元�?  for (let i = elements.length - 1; i >= 0; i--) {
+    const element = elements[i]
+
+      id: element.id,
+      type: element.type,
+      position: element.position,
+      size: element.size
+    })
+    
+    if (isPointInElement({ x: clickX, y: clickY }, element)) {
+
+      selectElement(element)
+      return
+    }
+  }
+  
+
+  deselectElement()
+}
+
+// 处理画布双击事件
+const handleCanvasDoubleClick = (event: MouseEvent) => {
+
+
+  
+  if (!canvasEngine) {
+
+    return
+  }
+  
+  // 获取点击位置
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect) {
+
+    return
+  }
+  
+  const clickX = event.clientX - rect.left
+  const clickY = event.clientY - rect.top
+  
+
+  
+  // 检查是否双击了元素
+  const elements = canvasEngine.getElements()
+
+  
+  // 从后往前遍历，找到最上层的元�?  for (let i = elements.length - 1; i >= 0; i--) {
+    const element = elements[i]
+
+      id: element.id,
+      type: element.type,
+      position: element.position,
+      size: element.size
+    })
+    
+    if (isPointInElement({ x: clickX, y: clickY }, element)) {
+
+      
+      // 选择元素并显示浮动工具栏（不需要切换工具）
+      selectElement(element)
+      return
+    }
+  }
+  
+
+  deselectElement()
+}
+
+// 检查点是否在元素内
+const isPointInElement = (point: { x: number; y: number }, element: any) => {
+  const { x, y } = element.position
+  const { x: width, y: height } = element.size
+  
+  const isInside = point.x >= x && 
+                   point.x <= x + width && 
+                   point.y >= y && 
+                   point.y <= y + height
+  
+
+
+  return isInside
+}
+
+// 选择元素
+const selectElement = (element: any) => {
+
+
+
+  selectedElement.value = element
+  showFloatingToolbar.value = true
+
+  
+  // 计算浮动工具栏位置（在形状上面居中）
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (rect && canvasEngine) {
+    // 获取视口管理器来计算正确的屏幕坐�?    const viewportManager = canvasEngine.getViewportManager()
+    const coordinateTransformer = viewportManager.getCoordinateTransformer()
+    
+    // 计算形状的中心位置（虚拟坐标�?    const centerX = element.position.x + element.size.x / 2
+    const centerY = element.position.y + element.size.y / 2
+    
+    // 将虚拟坐标转换为屏幕坐标
+    const screenCenter = coordinateTransformer.virtualToScreen({ x: centerX, y: centerY })
+    
+    // 工具栏在形状上方50px处水平居�?    // 计算形状的顶部位置，然后向上偏移50px
+    const shapeTop = element.position.y
+    const shapeTopScreen = coordinateTransformer.virtualToScreen({ x: centerX, y: shapeTop })
+    
+    // 先设置一个临时位置，然后通过DOM获取实际宽度来调�?    floatingToolbarPosition.value = {
+      x: screenCenter.x, // 先设置为中心�?      y: shapeTopScreen.y - 50   // 在形状顶部上�?0px
+    }
+    
+    // 使用nextTick确保DOM更新后获取实际宽�?    nextTick(() => {
+      const toolbarElement = document.querySelector('.floating-toolbar') as HTMLElement
+      if (toolbarElement) {
+        const toolbarWidth = toolbarElement.offsetWidth
+        const actualX = screenCenter.x - toolbarWidth / 2
+        floatingToolbarPosition.value = {
+          x: actualX,
+          y: shapeTopScreen.y - 50 // 在形状顶部上�?0px
+        }
+
+
+      }
+    })
+
+
+
+
+
+  } else {
+
+  }
+}
+
+// 取消选择元素
+const deselectElement = () => {
+
+  selectedElement.value = null
+  showFloatingToolbar.value = false
+}
+
+// 浮动工具栏事件处�?const updateElementStyle = (elementId: string, style: any) => {
+
+  if (canvasEngine) {
+    canvasEngine.updateElementStyle(elementId, style)
+  }
+}
+
+const activateStyleBrush = (elementId: string) => {
+
+  if (canvasEngine) {
+    canvasEngine.activateStyleBrush(elementId)
+
+  }
+}
+
+// 重置样式刷状�?const resetStyleBrush = () => {
+
+  if (floatingToolbarRef.value) {
+    floatingToolbarRef.value.resetStyleBrush()
+  }
+}
+
+const bringElementToFront = (elementId: string) => {
+
+  if (canvasEngine) {
+    canvasEngine.bringElementToFront(elementId)
+  }
+}
+
+const sendElementToBack = (elementId: string) => {
+
+  if (canvasEngine) {
+    canvasEngine.sendElementToBack(elementId)
+  }
+}
+
+// 键盘事件处理
+const handleKeyDown = (event: KeyboardEvent) => {
+  // 忽略在输入框中的按键
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+    return
+  }
+  
+  const key = event.key.toLowerCase()
+  
+  // 工具切换快捷�?  switch (key) {
+    case 'v':
+      setTool('select')
+      break
+    case 'p':
+      setTool('pen')
+      break
+    case 'r':
+      setTool('shape')
+      break
+    case 't':
+      setTool('text')
+      break
+    case 'a':
+      setTool('arrow')
+      break
+    case 'l':
+      setTool('line')
+      break
+    case 'e':
+      setTool('eraser')
+      break
+    case 'escape':
+      // 取消当前操作
+      if (canvasEngine) {
+        canvasEngine.cancelCurrentOperation()
+      }
+      break
+    case 'delete':
+    case 'backspace':
+      // 删除选中元素
+      if (canvasEngine) {
+        canvasEngine.deleteSelectedElements()
+      }
+      break
+  }
+  
+  // 缩放快捷�?  if (event.ctrlKey || event.metaKey) {
+    switch (key) {
+      case '=':
+      case '+':
+        event.preventDefault()
+        zoomIn()
+        break
+      case '-':
+        event.preventDefault()
+        zoomOut()
+        break
+      case '0':
+        event.preventDefault()
+        resetZoom()
+        break
+      case 'a':
+        event.preventDefault()
+        // 全�?        if (canvasEngine) {
+          canvasEngine.selectAllElements()
+        }
+        break
+    }
+  }
+}
+
+// 缩放操作
+const zoomIn = () => {
+
+  const newScale = Math.min(5, viewport.scale + 0.1)
+  zoomTo(newScale)
+  if (canvasEngine) {
+    canvasEngine.getViewportManager().zoom(newScale)
+  }
+}
+
+const zoomOut = () => {
+
+  const newScale = Math.max(0.1, viewport.scale - 0.1)
+  zoomTo(newScale)
+  if (canvasEngine) {
+    canvasEngine.getViewportManager().zoom(newScale)
+  }
+}
+
+const resetZoom = () => {
+
+  resetViewport()
+  if (canvasEngine) {
+    canvasEngine.resetViewport()
+  }
+}
+
+// 画布事件处理
+const handleCanvasMouseDown = (event: MouseEvent) => {
+  if (currentTool === 'select') {
+    // 选择工具逻辑
+
+  } else if (currentTool === 'pen') {
+    // 画笔工具逻辑
+
+  } else if (currentTool === 'shape') {
+    // 形状工具逻辑
+
+  } else if (currentTool === 'text') {
+    // 文本工具逻辑
+
+  }
+}
+
+const handleCanvasMouseMove = (event: MouseEvent) => {
+  // 鼠标移动处理
+}
+
+const handleCanvasMouseUp = (event: MouseEvent) => {
+  // 鼠标抬起处理
+}
+
+const handleCanvasWheel = (event: WheelEvent) => {
+  // 滚轮缩放处理
+  event.preventDefault()
+}
+
+// 测试功能
+const addTestElement = () => {
+
+  const element = createTestElement(ElementType.SHAPE, {
+    x: Math.random() * 500,
+    y: Math.random() * 300
+  })
+  
+  if (canvasEngine) {
+    canvasEngine.addElement(element)
+  }
+}
+
+const addTestElements = () => {
+  // 添加一些测试元�?  for (let i = 0; i < 3; i++) {
+    const element = createTestElement(ElementType.SHAPE, {
+      x: 100 + i * 150,
+      y: 100 + i * 50
+    })
+    
+    if (canvasEngine) {
+      canvasEngine.addElement(element)
+    }
+  }
+}
+
+const clearCanvas = () => {
+
+  clearElements()
+  if (canvasEngine) {
+    canvasEngine.clearElements()
+  }
+}
+
+// 显示帮助
+const showHelp = () => {
+  helpVisible.value = true
+}
+</script>
+
+<style scoped>
+.whiteboard-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #f5f5f5;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #f8f9fa;
+  width: 100%;
+  height: 100%;
+}
+
+.whiteboard-canvas {
+  display: block;
+  cursor: crosshair;
+  background: white;
+  width: 100%;
+  height: 100%;
+}
+
+.whiteboard-canvas:focus {
+  outline: none;
+}
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  background: white;
+  border-top: 1px solid #e0e0e0;
+  font-size: 12px;
+  color: #666;
+}
+
+.status-bar span {
+  white-space: nowrap;
+}
+
+.help-content {
+  line-height: 1.6;
+}
+
+.help-content h3 {
+  margin: 16px 0 8px 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.help-content ul {
+  margin: 0 0 16px 0;
+  padding-left: 20px;
+}
+
+.help-content li {
+  margin: 4px 0;
+}
+
+.help-content kbd {
+  background: #f5f5f5;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #333;
+}
+
+/* Iconify图标样式 */
+.dropdown-icon {
+  margin-right: 8px;
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* 移除所有按钮的圆角 */
+.el-button,
+.el-button-group .el-button {
+  border-radius: 0 !important;
+}
+
+/* 颜色下拉菜单样式 */
+.color-dropdown-content {
+  padding: 16px;
+  min-width: 300px;
+}
+
+.color-section {
+  margin-bottom: 16px;
+}
+
+.color-section:last-child {
+  margin-bottom: 0;
+}
+
+.color-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.el-button-group .el-button:first-child {
+  border-top-left-radius: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+.el-button-group .el-button:last-child {
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+}
+
+/* 下拉菜单样式优化 */
+.el-dropdown-menu__item.is-active {
+  background-color: #409eff;
+  color: white;
+}
+
+.el-dropdown-menu__item.is-active .el-icon {
+  color: white;
+}
+
+.el-dropdown-menu__item .el-icon {
+  margin-right: 8px;
+  color: #606266;
+}
+
+.el-dropdown-menu__item:hover .el-icon {
+  color: #409eff;
+}
+</style>

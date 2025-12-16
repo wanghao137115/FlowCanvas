@@ -1,0 +1,29 @@
+{
+  "name": "whiteboard-app",
+  "version": "1.0.0",
+  "description": "基于Vue 3和TypeScript的在线协作白板应用",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "@iconify/json": "^2.2.384",
+    "@iconify/vue": "^5.0.0",
+    "cropperjs": "^2.0.1",
+    "element-plus": "^2.4.4",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/cropperjs": "^1.1.5",
+    "@types/node": "^20.10.6",
+    "@vitejs/plugin-vue": "^4.5.2",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vue-tsc": "^1.8.25"
+  }
+}
