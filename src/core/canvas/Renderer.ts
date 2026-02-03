@@ -49,6 +49,15 @@ export class Renderer {
   private dirtyRegions: Array<{ x: number; y: number; width: number; height: number }> = []
   private needsFullRender: boolean = true
 
+  // 离屏缓存：针对静态元素（主要是形状和文本）
+  private elementCache: Map<
+    string,
+    {
+      canvas: HTMLCanvasElement
+      version: string
+    }
+  > = new Map()
+
   constructor(canvas: HTMLCanvasElement, viewportManager: ViewportManager, coordinateTransformer: CoordinateTransformer) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')!
@@ -118,8 +127,7 @@ export class Renderer {
    */
   render(elements: CanvasElement[]): void {
     const now = performance.now()
-    
-    
+
     // 节流渲染，避免过度渲染
     // 但是如果有智能参考线，需要跳过节流
     if (now - this.lastRenderTime < this.renderThrottleMs && this.smartGuides.length === 0) {
@@ -131,8 +139,7 @@ export class Renderer {
     }
     this.lastRenderTime = now
 
-    // 如果不需要全量渲染且没有脏区域，跳过渲染
-    // 但是如果有智能参考线，需要强制渲染
+    // 如果既不需要全量渲染、也没有脏区域、也没有智能参考线，则无需渲染
     if (!this.needsFullRender && this.dirtyRegions.length === 0 && this.smartGuides.length === 0) {
       // 即使跳过渲染，也要渲染连接点（如果存在悬浮元素）
       if (this.hoveredElement && this.connectionPoints.length > 0) {
@@ -141,18 +148,24 @@ export class Renderer {
       return
     }
 
-    // 清空画布
-    this.clearCanvas()
+    // 有智能参考线时，仍然执行全量渲染，确保画面一致性
+    if (this.needsFullRender || this.smartGuides.length > 0) {
+      // 清空画布
+      this.clearCanvas()
+      
+      // 获取视口信息
+      const viewport = this.viewportManager.getViewport()
+      const visibleElements = this.getVisibleElements(elements, viewport)
+      
+      // 渲染所有可见元素
+      visibleElements.forEach(element => {
+        this.renderElement(element)
+      })
+    } else if (this.dirtyRegions.length > 0) {
+      // 仅渲染脏区域
+      this.renderDirtyRegions(elements)
+    }
 
-    // 获取视口信息
-    const viewport = this.viewportManager.getViewport()
-    const visibleElements = this.getVisibleElements(elements, viewport)
-
-    // 渲染所有可见元素
-    visibleElements.forEach(element => {
-      this.renderElement(element)
-    })
-    
     // 如果处于预览模式，渲染预览元素
     if (this.isPreviewMode && this.previewElements.length > 0) {
       this.renderPreviewElements()
@@ -160,10 +173,10 @@ export class Renderer {
 
     // 渲染连接点（在最后渲染，确保在最上层）
     this.renderConnectionPoints()
-    
+
     // 渲染连接线（拖拽时）
     this.renderConnectionLine()
-    
+
     // 渲染智能参考线（在最后渲染，确保在最上层）
     this.renderSmartGuides()
 
@@ -192,6 +205,121 @@ export class Renderer {
    */
   markDirtyRegion(x: number, y: number, width: number, height: number): void {
     this.dirtyRegions.push({ x, y, width, height })
+  }
+
+  /**
+   * 仅重绘脏区域（增量渲染）
+   */
+  private renderDirtyRegions(elements: CanvasElement[]): void {
+    if (this.dirtyRegions.length === 0) return
+
+    const viewport = this.viewportManager.getViewport()
+    const visibleElements = this.getVisibleElements(elements, viewport)
+
+    // 合并重叠或相邻的脏区域，减少重复绘制
+    const mergedRegions = this.mergeDirtyRegions(this.dirtyRegions)
+
+    mergedRegions.forEach(region => {
+      // 在该区域内裁剪 + 清空，再只绘制与该区域相交的元素
+      this.ctx.save()
+
+      this.ctx.beginPath()
+      this.ctx.rect(region.x, region.y, region.width, region.height)
+      this.ctx.clip()
+
+      // 先清空该区域
+      this.ctx.clearRect(region.x, region.y, region.width, region.height)
+
+      // 渲染与该脏区域相交的元素
+      visibleElements.forEach(element => {
+        const rect = this.getElementScreenRect(element)
+        if (this.rectsIntersect(region, rect)) {
+          this.renderElement(element)
+        }
+      })
+
+      this.ctx.restore()
+    })
+  }
+
+  /**
+   * 计算元素在屏幕坐标系下的包围盒（近似，未考虑旋转后的精确外接矩形）
+   */
+  private getElementScreenRect(element: CanvasElement): { x: number; y: number; width: number; height: number } {
+    const screenPos = this.coordinateTransformer.virtualToScreen(element.position)
+    const screenSize = this.coordinateTransformer.virtualToScreenSize(element.size)
+
+    return {
+      x: screenPos.x,
+      y: screenPos.y,
+      width: screenSize.x,
+      height: screenSize.y
+    }
+  }
+
+  /**
+   * 判断两个矩形是否相交
+   */
+  private rectsIntersect(
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number }
+  ): boolean {
+    return !(
+      a.x + a.width <= b.x ||
+      b.x + b.width <= a.x ||
+      a.y + a.height <= b.y ||
+      b.y + b.height <= a.y
+    )
+  }
+
+  /**
+   * 合并重叠或相邻的脏区域，减少渲染次数
+   */
+  private mergeDirtyRegions(
+    regions: Array<{ x: number; y: number; width: number; height: number }>
+  ): Array<{ x: number; y: number; width: number; height: number }> {
+    if (regions.length <= 1) return regions.slice()
+
+    const merged: Array<{ x: number; y: number; width: number; height: number }> = []
+
+    regions.forEach(region => {
+      let hasMerged = false
+
+      for (let i = 0; i < merged.length; i++) {
+        const existing = merged[i]
+
+        // 如果重叠或接近（允许 1 像素的间隙），就合并成一个更大的矩形
+        const extendedExisting = {
+          x: existing.x - 1,
+          y: existing.y - 1,
+          width: existing.width + 2,
+          height: existing.height + 2
+        }
+
+        if (this.rectsIntersect(extendedExisting, region)) {
+          const minX = Math.min(existing.x, region.x)
+          const minY = Math.min(existing.y, region.y)
+          const maxX = Math.max(existing.x + existing.width, region.x + region.width)
+          const maxY = Math.max(existing.y + existing.height, region.y + region.height)
+
+          merged[i] = {
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY
+          }
+
+          hasMerged = true
+          break
+        }
+      }
+
+      if (!hasMerged) {
+        merged.push({ ...region })
+      }
+    })
+
+    return merged
   }
 
   /**
@@ -433,29 +561,117 @@ export class Renderer {
     // 移动到元素的左上角（相对于中心点）
     this.ctx.translate(-screenSize.x / 2, -screenSize.y / 2)
 
-    // 根据元素类型渲染
-    switch (element.type) {
-      case 'shape':
-        this.renderShapeElement(element)
-        break
-      case 'text':
-        this.renderTextElement(element)
-        break
-      case 'path':
-        this.renderPathElement(element)
-        break
-      case 'image':
-        this.renderImageElement(element)
-        break
-      case 'arrow':
-        this.renderArrowElement(element)
-        break
-      case 'line':
-        this.renderLineElement(element)
-        break
+    // 仅对形状和文本使用离屏缓存，其它类型保持原有实时渲染逻辑，避免与复杂变换/图片渲染耦合
+    if (element.type === 'shape' || element.type === 'text') {
+      const version = this.getElementVersion(element)
+      let cacheEntry = this.elementCache.get(element.id)
+
+      // 如果没有缓存或版本不一致，重新生成离屏缓存
+      if (!cacheEntry || cacheEntry.version !== version) {
+        cacheEntry = this.renderElementToCache(element, version)
+        this.elementCache.set(element.id, cacheEntry)
+      }
+
+      const cacheCanvas = cacheEntry.canvas
+
+      // 将离屏 Canvas 绘制到主画布（这里已经在元素坐标系下，只需画内容）
+      this.ctx.drawImage(cacheCanvas, 0, 0, screenSize.x, screenSize.y)
+    } else {
+      // 其它类型保持原有渲染路径
+      switch (element.type) {
+        case 'shape':
+          this.renderShapeElement(element)
+          break
+        case 'text':
+          this.renderTextElement(element)
+          break
+        case 'path':
+          this.renderPathElement(element)
+          break
+        case 'image':
+          this.renderImageElement(element)
+          break
+        case 'arrow':
+          this.renderArrowElement(element)
+          break
+        case 'line':
+          this.renderLineElement(element)
+          break
+      }
     }
 
     this.ctx.restore()
+  }
+
+  /**
+   * 将元素内容渲染到离屏 Canvas（不包含位移/旋转，只渲染局部内容）
+   */
+  private renderElementToCache(
+    element: CanvasElement,
+    version: string
+  ): { canvas: HTMLCanvasElement; version: string } {
+    // 使用元素自身的尺寸作为离屏画布尺寸（虚拟坐标系）
+    const width = Math.max(1, Math.round(element.size.x || 1))
+    const height = Math.max(1, Math.round(element.size.y || 1))
+
+    const offscreen = document.createElement('canvas')
+    offscreen.width = width
+    offscreen.height = height
+    const offCtx = offscreen.getContext('2d')!
+
+    // 暂时切换 ctx，让现有渲染逻辑在离屏画布上执行
+    const originalCtx = this.ctx
+    this.ctx = offCtx
+
+    try {
+      switch (element.type) {
+        case 'shape':
+          this.renderShapeElement(element)
+          break
+        case 'text':
+          this.renderTextElement(element)
+          break
+      }
+    } finally {
+      this.ctx = originalCtx
+    }
+
+    return {
+      canvas: offscreen,
+      version
+    }
+  }
+
+  /**
+   * 生成用于判断缓存是否失效的版本标识
+   * 简单做法：基于元素的关键字段序列化；包含当前缩放，缩放变化时会重建缓存
+   */
+  private getElementVersion(element: CanvasElement): string {
+    const viewport = this.viewportManager.getViewport()
+
+    // 只包含与渲染结果强相关的字段
+    return JSON.stringify({
+      type: element.type,
+      size: element.size,
+      style: element.style,
+      data: element.data,
+      rotation: element.rotation,
+      scale: viewport.scale
+    })
+  }
+
+  /**
+   * 外部可显式使某个元素的缓存失效
+   */
+  invalidateElementCache(elementId: string): void {
+    this.elementCache.delete(elementId)
+  }
+
+  /**
+   * 清空所有离屏缓存
+   */
+  clearElementCache(): void {
+    this.elementCache.clear()
   }
 
   /**

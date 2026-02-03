@@ -5315,10 +5315,6 @@ export class CanvasEngine {
     if (!this.snapDebugLogging) {
       return
     }
-    console.log(`[SnapDebug] ${action}`, {
-      ...details,
-      timestamp: Date.now()
-    })
   }
 
   /**
