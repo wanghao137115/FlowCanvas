@@ -72,6 +72,10 @@ export class CanvasEngine {
   private onDrawingStateChange?: (isDrawing: boolean) => void
   private onElementCreated?: (element: CanvasElement) => void
   private onElementsAdded?: (elements: CanvasElement[]) => void
+  private onElementUpdated?: (element: CanvasElement, oldElement: CanvasElement) => void
+  private onElementLock?: (elementId: string, userId: string) => void
+  private onElementUnlock?: (elementId: string, userId: string) => void
+  private onBeforeDragStart?: (elements: CanvasElement[]) => boolean  // 返回false阻止拖动
   private onStyleBrushReset?: () => void
   private onSelectionChange?: (elements: CanvasElement[]) => void
   private onFloatingToolbarVisibilityChange?: (visible: boolean) => void
@@ -80,6 +84,31 @@ export class CanvasEngine {
   private onLayersChange?: (layers: any[]) => void
   private onCurrentLayerChange?: (layerId: string | null) => void
   private onShapeTextEditStateChange?: (isEditing: boolean, element?: CanvasElement) => void
+  private onAfterRender?: (ctx: CanvasRenderingContext2D) => void
+  
+  // ==================== 性能优化相关 ====================
+  // 缓存的视口边界，用于裁剪计算
+  private cachedViewportBounds: { x: number; y: number; width: number; height: number } | null = null
+  // 脏标记：元素是否发生变化，需要重新渲染
+  private isDirty: boolean = true
+  // 视口边界缓存是否有效
+  private viewportBoundsCacheValid: boolean = false
+  // LOD 阈值配置
+  private lodConfig = {
+    lowDetailScale: 0.3,    // 低于此缩放级别启用低细节渲染
+    highDetailScale: 2.0,   // 高于此缩放级别启用高细节渲染
+    skipTextOnLowDetail: true,
+    simplifyPathsOnLowDetail: true,
+    reduceImageQualityOnLowDetail: true
+  }
+  // 当前 LOD 级别
+  private currentLODLevel: 'low' | 'medium' | 'high' = 'medium'
+  
+  // ==================== 空间索引优化 ====================
+  // 空间哈希索引：用于快速查找元素
+  private spatialIndex: Map<string, Set<string>> = new Map() // gridKey -> Set<elementId>
+  private gridSize: number = 500 // 网格大小
+  private spatialIndexValid: boolean = false
   
   // 复制模式状态
   private copyMode: 'continuous' | 'click' = 'continuous'
@@ -465,6 +494,14 @@ export class CanvasEngine {
       })
       
       selectTool.setOnDragStart((elements: CanvasElement[]) => {
+        // 触发拖动开始前检查回调
+        if (this.onBeforeDragStart) {
+          const canDrag = this.onBeforeDragStart(elements)
+          if (!canDrag) {
+            console.log('[CanvasEngine] 拖动被阻止：元素被其他用户锁定')
+            return // 阻止拖动
+          }
+        }
         
         // 设置内部更新标志，防止拖动过程中显示浮动工具栏
         this.isInternalUpdate = true
@@ -473,6 +510,16 @@ export class CanvasEngine {
         if (this.onFloatingToolbarVisibilityChange) {
           this.onFloatingToolbarVisibilityChange(false)
         }
+        
+        // 触发元素锁定回调（通知外部，如协作系统）
+        // 获取当前用户ID（如果没有则使用临时ID）
+        const userId = this.canvasStore?.userId || 'unknown'
+        elements.forEach(element => {
+          if (this.onElementLock) {
+            this.onElementLock(element.id, userId)
+          }
+        })
+        
         this.render()
       })
       
@@ -516,6 +563,14 @@ export class CanvasEngine {
         
         // 重置内部更新标志
         this.isInternalUpdate = false
+        
+        // 触发元素解锁回调（通知外部，如协作系统）
+        const userId = this.canvasStore?.userId || 'unknown'
+        elements.forEach(element => {
+          if (this.onElementUnlock) {
+            this.onElementUnlock(element.id, userId)
+          }
+        })
         
         // 重新渲染
         this.render()
@@ -1303,6 +1358,8 @@ export class CanvasEngine {
       } else {
         this.viewportManager.updatePan(position)
       }
+      // 平移时使视口缓存失效
+      this.invalidateViewportCache()
       this.requestRender()
       return
     }
@@ -1479,6 +1536,10 @@ export class CanvasEngine {
 
     const delta = event.deltaY > 0 ? 0.95 : 1.05
     this.viewportManager.zoom(delta, position)
+    
+    // 缩放后使视口缓存失效
+    this.invalidateViewportCache()
+    
     this.requestRender()
   }
 
@@ -1624,6 +1685,11 @@ export class CanvasEngine {
    * 渲染画布
    */
   render(): void {
+    // 脏检查：只有当画布为脏时才重新渲染
+    if (!this.shouldRender()) {
+      return
+    }
+
     if (!this.isInitialized) return
 
     const ctx = this.canvas.getContext('2d')
@@ -1688,6 +1754,11 @@ export class CanvasEngine {
     // 渲染智能参考线（在最后渲染，确保在最上层）
     this.renderer.renderSmartGuidesOnly()
     
+    // 执行afterRender回调（用于绘制协作光标等）
+    if (this.onAfterRender) {
+      this.onAfterRender(ctx)
+    }
+    
     // 恢复画布状态
     ctx.restore()
   }
@@ -1696,11 +1767,11 @@ export class CanvasEngine {
    * 请求渲染（用于工具内部调用）
    */
   requestRender(): void {
-
+    // 标记为脏
+    this.markDirty()
     
     // 如果正在编辑形状文字，跳过渲染以避免干扰输入框
     if (this.isEditingShapeText) {
-
       return
     }
     
@@ -2464,6 +2535,9 @@ export class CanvasEngine {
       selectTool.setAllElements(this.elements)
     }
     
+    // 使空间索引失效
+    this.invalidateSpatialIndex()
+    
     // 更新操作执行器的状态
     this.operationExecutor.setElements(this.elements)
     
@@ -2486,6 +2560,16 @@ export class CanvasEngine {
     // 更新样式刷工具的元素列表
     if (this.styleBrushTool && 'updateElements' in this.styleBrushTool) {
       (this.styleBrushTool as any).updateElements(this.elements)
+    }
+    
+    // 触发元素创建回调（通知外部，如协作系统）
+    if (this.onElementCreated) {
+      this.onElementCreated(element)
+    }
+    
+    // 触发元素添加回调
+    if (this.onElementsAdded) {
+      this.onElementsAdded([element])
     }
     
     
@@ -2524,6 +2608,9 @@ export class CanvasEngine {
       if (selectTool) {
         selectTool.setAllElements(this.elements)
       }
+      
+      // 使空间索引失效
+      this.invalidateSpatialIndex()
       
       // 更新操作执行器的状态
       this.operationExecutor.setElements(this.elements)
@@ -2639,7 +2726,20 @@ export class CanvasEngine {
       }
       
       // 现在更新 element.position（这会同时更新 storeElement.position，因为它们是同一个引用）
+      // 保存旧元素用于回调
+      const oldElement = { ...element, position: { ...element.position } }
       element.position = { ...newPosition }
+      
+      // 触发元素更新回调（通知外部，如协作系统）
+      if (this.onElementUpdated) {
+        this.onElementUpdated(element, oldElement)
+      }
+      
+      // 清除该元素的离屏缓存
+      this.renderer.invalidateElementCache(element.id)
+      
+      // 使空间索引失效（元素位置变化）
+      this.invalidateSpatialIndex()
       
       // 如果找到了 storeElement，触发响应式更新
       if (storeElement && storeOldPos) {
@@ -2835,6 +2935,34 @@ export class CanvasEngine {
   }
 
   /**
+   * 设置元素更新回调
+   */
+  setOnElementUpdated(callback: (element: CanvasElement, oldElement: CanvasElement) => void): void {
+    this.onElementUpdated = callback
+  }
+
+  /**
+   * 设置元素锁定回调
+   */
+  setOnElementLock(callback: (elementId: string, userId: string) => void): void {
+    this.onElementLock = callback
+  }
+
+  /**
+   * 设置元素解锁回调
+   */
+  setOnElementUnlock(callback: (elementId: string, userId: string) => void): void {
+    this.onElementUnlock = callback
+  }
+
+  /**
+   * 设置拖动开始前回调 - 返回false阻止拖动
+   */
+  setOnBeforeDragStart(callback: (elements: CanvasElement[]) => boolean): void {
+    this.onBeforeDragStart = callback
+  }
+
+  /**
    * 设置样式刷重置回调
    */
   setOnStyleBrushReset(callback: () => void): void {
@@ -2878,6 +3006,13 @@ export class CanvasEngine {
    */
   setOnShapeTextEditStateChange(callback: (isEditing: boolean, element?: CanvasElement) => void): void {
     this.onShapeTextEditStateChange = callback
+  }
+
+  /**
+   * 设置渲染完成后回调（用于绘制协作光标等）
+   */
+  setOnAfterRender(callback: (ctx: CanvasRenderingContext2D) => void): void {
+    this.onAfterRender = callback
   }
 
   /**
@@ -3620,12 +3755,198 @@ export class CanvasEngine {
       layer.elements.forEach(elementId => {
         const element = this.elements.find(el => el.id === elementId)
         if (element) {
+          // 视口裁剪：检查元素是否在视口内
+          if (!this.isElementInViewport(element)) {
+            return // 跳过视口外的元素
+          }
           this.renderer.renderElement(element)
         }
       })
 
       ctx.restore()
     })
+  }
+
+  // ==================== 性能优化方法 ====================
+  
+  /**
+   * 获取当前视口边界（带缓存）
+   */
+  private getViewportBoundsCached(): { x: number; y: number; width: number; height: number } {
+    // 如果缓存无效，重新计算
+    if (!this.viewportBoundsCacheValid) {
+      this.cachedViewportBounds = this.viewportManager.getViewportBounds()
+      this.viewportBoundsCacheValid = true
+      
+      // 更新 LOD 级别
+      this.updateLODLevel()
+    }
+    return this.cachedViewportBounds!
+  }
+
+  /**
+   * 使视口边界缓存失效（在视口变化时调用）
+   */
+  private invalidateViewportCache(): void {
+    this.viewportBoundsCacheValid = false
+    this.markDirty()
+  }
+
+  /**
+   * 检查元素是否在当前视口内（带边距缓冲）
+   */
+  private isElementInViewport(element: CanvasElement): boolean {
+    const viewport = this.getViewportBoundsCached()
+    const margin = 50 // 边距缓冲，让元素在进入视口前就开始渲染
+    
+    // 计算元素的边界（考虑旋转和大小）
+    const bounds = this.getElementBounds(element)
+    
+    // 检查元素是否与视口相交
+    return !(
+      bounds.x + bounds.width < viewport.x - margin ||
+      bounds.x > viewport.x + viewport.width + margin ||
+      bounds.y + bounds.height < viewport.y - margin ||
+      bounds.y > viewport.y + viewport.height + margin
+    )
+  }
+
+  /**
+   * 获取元素的边界框（考虑旋转）
+   */
+  private getElementBounds(element: CanvasElement): { x: number; y: number; width: number; height: number } {
+    const { position, size } = element
+    
+    // 简单处理：返回轴对齐包围盒
+    // 对于旋转元素，这里可以进一步优化计算精确的旋转包围盒
+    return {
+      x: position.x,
+      y: position.y,
+      width: size.x,
+      height: size.y
+    }
+  }
+
+  /**
+   * 更新 LOD 级别
+   */
+  private updateLODLevel(): void {
+    const scale = this.viewportManager.getScale()
+    
+    if (scale < this.lodConfig.lowDetailScale) {
+      this.currentLODLevel = 'low'
+    } else if (scale > this.lodConfig.highDetailScale) {
+      this.currentLODLevel = 'high'
+    } else {
+      this.currentLODLevel = 'medium'
+    }
+    
+    // 将 LOD 级别传递给渲染器
+    if (this.renderer) {
+      (this.renderer as any).setLODLevel(this.currentLODLevel)
+    }
+  }
+
+  /**
+   * 标记画布为脏状态，需要重新渲染
+   */
+  markDirty(): void {
+    this.isDirty = true
+  }
+
+  /**
+   * 检查是否需要渲染（脏检查）
+   */
+  private shouldRender(): boolean {
+    if (!this.isDirty) {
+      return false
+    }
+    this.isDirty = false
+    return true
+  }
+
+  /**
+   * 使缓存失效的公共方法（供外部调用）
+   */
+  public invalidateCaches(): void {
+    this.invalidateViewportCache()
+    this.invalidateSpatialIndex()
+  }
+
+  // ==================== 空间索引方法 ====================
+  
+  /**
+   * 使空间索引失效
+   */
+  private invalidateSpatialIndex(): void {
+    this.spatialIndexValid = false
+  }
+
+  /**
+   * 构建空间索引
+   */
+  private buildSpatialIndex(): void {
+    this.spatialIndex.clear()
+    
+    for (const element of this.elements) {
+      if (!element.visible) continue
+      
+      const bounds = this.getElementBounds(element)
+      const gridKeys = this.getGridKeysForBounds(bounds)
+      
+      for (const key of gridKeys) {
+        if (!this.spatialIndex.has(key)) {
+          this.spatialIndex.set(key, new Set())
+        }
+        this.spatialIndex.get(key)!.add(element.id)
+      }
+    }
+    
+    this.spatialIndexValid = true
+  }
+
+  /**
+   * 获取包围盒覆盖的网格键集合
+   */
+  private getGridKeysForBounds(bounds: { x: number; y: number; width: number; height: number }): string[] {
+    const keys: string[] = []
+    const startX = Math.floor(bounds.x / this.gridSize)
+    const startY = Math.floor(bounds.y / this.gridSize)
+    const endX = Math.floor((bounds.x + bounds.width) / this.gridSize)
+    const endY = Math.floor((bounds.y + bounds.height) / this.gridSize)
+    
+    for (let x = startX; x <= endX; x++) {
+      for (let y = startY; y <= endY; y++) {
+        keys.push(`${x},${y}`)
+      }
+    }
+    
+    return keys
+  }
+
+  /**
+   * 获取点所在的网格键
+   */
+  private getGridKey(x: number, y: number): string {
+    return `${Math.floor(x / this.gridSize)},${Math.floor(y / this.gridSize)}`
+  }
+
+  /**
+   * 使用空间索引获取可能包含该点的元素ID
+   */
+  private getCandidateElements(position: Vector2): string[] {
+    if (!this.spatialIndexValid) {
+      this.buildSpatialIndex()
+    }
+    
+    const key = this.getGridKey(position.x, position.y)
+    const candidates = this.spatialIndex.get(key)
+    
+    if (!candidates) {
+      return []
+    }
+    
+    return Array.from(candidates)
   }
 
   /**
@@ -4291,14 +4612,26 @@ export class CanvasEngine {
   }
 
   /**
-   * 获取指定位置的元素
+   * 获取指定位置的元素（使用空间索引优化）
    */
   private getElementAtPosition(position: Vector2): CanvasElement | null {
-
+    // 使用空间索引获取候选元素
+    const candidateIds = this.getCandidateElements(position)
+    
+    // 如果没有候选元素，直接返回null
+    if (candidateIds.length === 0) {
+      return null
+    }
     
     // 从后往前遍历，优先选择最上层的元素
     for (let i = this.elements.length - 1; i >= 0; i--) {
       const element = this.elements[i]
+      
+      // 只检查候选元素
+      if (!candidateIds.includes(element.id)) {
+        continue
+      }
+      
       const isInElement = this.isPointInElement(position, element)
       const isOperable = this.isElementOperable(element)
       

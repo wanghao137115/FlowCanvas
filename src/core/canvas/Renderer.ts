@@ -48,7 +48,10 @@ export class Renderer {
   private renderThrottleMs: number = 16 // 60fps
   private dirtyRegions: Array<{ x: number; y: number; width: number; height: number }> = []
   private needsFullRender: boolean = true
-
+  
+  // LOD (Level of Detail) 级别
+  private lodLevel: 'low' | 'medium' | 'high' = 'medium'
+  
   // 离屏缓存：针对静态元素（主要是形状和文本）
   private elementCache: Map<
     string,
@@ -72,6 +75,20 @@ export class Renderer {
     
     // 初始化预览层
     this.initializePreviewLayer()
+  }
+
+  /**
+   * 设置 LOD 级别
+   */
+  setLODLevel(level: 'low' | 'medium' | 'high'): void {
+    this.lodLevel = level
+  }
+
+  /**
+   * 获取当前 LOD 级别
+   */
+  getLODLevel(): 'low' | 'medium' | 'high' {
+    return this.lodLevel
   }
 
   /**
@@ -544,6 +561,11 @@ export class Renderer {
     const screenPos = this.coordinateTransformer.virtualToScreen(element.position)
     const screenSize = this.coordinateTransformer.virtualToScreenSize(element.size)
     
+    // LOD 优化：极低细节级别时，跳过太小的元素
+    if (this.lodLevel === 'low' && (screenSize.x < 2 || screenSize.y < 2)) {
+      return
+    }
+    
     this.ctx.save()
 
     // 计算元素中心点（屏幕坐标）
@@ -561,8 +583,10 @@ export class Renderer {
     // 移动到元素的左上角（相对于中心点）
     this.ctx.translate(-screenSize.x / 2, -screenSize.y / 2)
 
-    // 仅对形状和文本使用离屏缓存，其它类型保持原有实时渲染逻辑，避免与复杂变换/图片渲染耦合
-    if (element.type === 'shape' || element.type === 'text') {
+    // LOD 优化：低细节级别时不使用离屏缓存，直接绘制简化版本
+    const useCache = (element.type === 'shape' || element.type === 'text') && this.lodLevel !== 'low'
+    
+    if (useCache) {
       const version = this.getElementVersion(element)
       let cacheEntry = this.elementCache.get(element.id)
 
@@ -576,6 +600,9 @@ export class Renderer {
 
       // 将离屏 Canvas 绘制到主画布（这里已经在元素坐标系下，只需画内容）
       this.ctx.drawImage(cacheCanvas, 0, 0, screenSize.x, screenSize.y)
+    } else if (this.lodLevel === 'low') {
+      // LOD 低细节：绘制简化版本（只有填充矩形）
+      this.renderElementLowDetail(element, screenSize)
     } else {
       // 其它类型保持原有渲染路径
       switch (element.type) {
@@ -601,6 +628,29 @@ export class Renderer {
     }
 
     this.ctx.restore()
+  }
+
+  /**
+   * LOD 低细节渲染：只绘制简化版本
+   */
+  private renderElementLowDetail(element: CanvasElement, screenSize: { x: number; y: number }): void {
+    const ctx = this.ctx
+    
+    // 获取元素样式
+    const fill = element.style?.fill || '#cccccc'
+    const stroke = element.style?.stroke || 'transparent'
+    const strokeWidth = element.style?.strokeWidth || 1
+    
+    // 绘制填充矩形
+    ctx.fillStyle = fill
+    ctx.fillRect(0, 0, screenSize.x, screenSize.y)
+    
+    // 如果有描边则绘制
+    if (stroke && stroke !== 'transparent') {
+      ctx.strokeStyle = stroke
+      ctx.lineWidth = Math.max(1, strokeWidth)
+      ctx.strokeRect(0, 0, screenSize.x, screenSize.y)
+    }
   }
 
   /**

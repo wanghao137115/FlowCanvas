@@ -201,6 +201,23 @@
 
       <div class="toolbar-section">
         <el-button @click="clearCanvas" type="danger">清空画布</el-button>
+        
+        <!-- 压力测试按钮 -->
+        <el-dropdown @command="handleStressTestCommand">
+          <el-button type="warning" :loading="stressTestRunning">
+            {{ stressTestRunning ? '测试中...' : '压力测试' }}
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="100">添加 100 元素</el-dropdown-item>
+              <el-dropdown-item command="500">添加 500 元素</el-dropdown-item>
+              <el-dropdown-item command="1000">添加 1000 元素</el-dropdown-item>
+              <el-dropdown-item command="2000">添加 2000 元素</el-dropdown-item>
+              <el-dropdown-item command="clear" divided>清除测试元素</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        
         <el-button @click="showHelp" :icon="QuestionFilled" title="显示帮助">帮助</el-button>
       </div>
 
@@ -348,6 +365,9 @@
 
     <!-- 缩略图导航 -->
     <MiniMap :visible="true" :width="200" :height="150" />
+
+    <!-- 协作面板 -->
+    <CollaborationPanel :is-enabled="true" :show-user-list="true" :show-tip="true" />
 
     <!-- 图层选择对话框 -->
     <LayerSelectDialog
@@ -525,9 +545,12 @@ import StylePanel from './StylePanel.vue'
 import FloatingStyleToolbar from './FloatingStyleToolbar.vue'
 import LayerSelectDialog from './LayerSelectDialog.vue'
 import MiniMap from './MiniMap.vue'
+import CollaborationPanel from '@/components/Collaboration/CollaborationPanel.vue'
 import ImageSelectorModal from '../ImageSelectorModal.vue'
 import TemplateSelectorModal from '../TemplateSelectorModal.vue'
 import { FlowTemplate } from '@/types/template.types'
+import { getCollaborationManager } from '@/core/collaboration'
+import type { CollaborationManager } from '@/core/collaboration'
 
 // 组件引用
 const canvasRef = ref<HTMLCanvasElement>()
@@ -622,6 +645,9 @@ const {
 // 画布引擎
 let canvasEngine: CanvasEngine | null = null
 
+// 协作管理器
+let collaborationManager: CollaborationManager | null = null
+
 // 帮助对话框状态
 const helpVisible = ref(false)
 
@@ -698,6 +724,48 @@ onMounted(async () => {
     canvasEngine.setOnElementCreated((element: any) => {
       // 自动选择新创建的元素并显示浮动工具栏
       selectElement(element)
+      
+      // 广播元素创建操作
+      broadcastOperation('add-element', element, element.id)
+    })
+
+    // 设置元素更新回调 - 实时广播元素移动/更新
+    canvasEngine.setOnElementUpdated((element: any, oldElement: any) => {
+      console.log('[Canvas] 元素更新回调触发:', element.id)
+      // 广播元素更新操作
+      broadcastOperation('update-element', {
+        position: element.position,
+        size: element.size,
+        rotation: element.rotation,
+        style: element.style,
+        data: element.data
+      }, element.id)
+    })
+
+    // 设置元素锁定回调
+    canvasEngine.setOnElementLock((elementId: string, userId: string) => {
+      console.log('[Canvas] 元素锁定:', elementId, 'by', userId)
+      broadcastOperation('lock-element', { userId }, elementId)
+    })
+
+    // 设置元素解锁回调
+    canvasEngine.setOnElementUnlock((elementId: string, userId: string) => {
+      console.log('[Canvas] 元素解锁:', elementId, 'by', userId)
+      broadcastOperation('unlock-element', { userId }, elementId)
+    })
+
+    // 设置拖动开始前检查回调 - 检查元素是否被锁定
+    canvasEngine.setOnBeforeDragStart((elements: any[]) => {
+      const userId = currentUserId.value
+      for (const element of elements) {
+        const lockingUserId = lockedElements.value.get(element.id)
+        if (lockingUserId && lockingUserId !== userId) {
+          // 元素被其他用户锁定，显示提示
+          ElMessage.warning('元素正在被其他用户操作，无法操作')
+          return false  // 阻止拖动
+        }
+      }
+      return true  // 允许拖动
     })
 
     // 设置样式刷重置回调
@@ -830,6 +898,9 @@ onMounted(async () => {
     // 初始渲染画布，确保画布可见
     canvasEngine.render()
     
+    // 初始化协作系统
+    initCollaboration()
+
     // 延迟再次渲染，确保网格和标尺正确显示
     setTimeout(() => {
       if (canvasEngine) {
@@ -886,6 +957,225 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateCanvasSize)
   window.removeEventListener('keydown', handleKeyDown)
 })
+
+// 初始化协作系统
+// 处理鼠标移动 - 广播光标位置（发送屏幕坐标）
+const handleMouseMoveForCollab = (event: MouseEvent) => {
+  if (!collaborationManager || !canvasRef.value) return
+  
+  const rect = canvasRef.value.getBoundingClientRect()
+  
+  // 直接使用相对于canvas的屏幕坐标
+  const screenPos = {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top
+  }
+  
+  // 直接广播屏幕坐标
+  collaborationManager.updateCursor(screenPos)
+}
+
+const initCollaboration = () => {
+  try {
+    // 创建协作管理器
+    collaborationManager = getCollaborationManager({
+      enabled: true,
+      channelName: 'flowcanvas-collab',
+      showCursors: true,
+      cursorFollowDelay: 50,
+      showUserList: true
+    })
+    
+    // 设置当前用户ID
+    currentUserId.value = collaborationManager.getUserManager().getLocalUser().id
+    
+    // 设置操作回调 - 将远程操作应用到本地画布
+    collaborationManager.setCallbacks({
+      onOperation: (operation) => {
+        handleRemoteOperation(operation)
+      },
+      onError: (error) => {
+        console.error('[Canvas] 协作错误:', error)
+      }
+    })
+    
+    // 连接协作频道
+    collaborationManager.connect()
+    
+    // 添加鼠标移动监听，广播光标位置
+    const canvasEl = canvasRef.value
+    if (canvasEl) {
+      canvasEl.addEventListener('mousemove', handleMouseMoveForCollab)
+    }
+    
+    // 使用 DOM 方式渲染远程光标（更可靠）
+    const cursorManager = collaborationManager.getCursorManager()
+    const containerEl = canvasContainer.value
+    if (containerEl) {
+      // 创建光标容器
+      const cursorContainer = document.createElement('div')
+      cursorContainer.className = 'collab-cursors'
+      cursorContainer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1000;'
+      containerEl.appendChild(cursorContainer)
+      
+      // 监听光标变化并更新 DOM
+      cursorManager.onCursorChange((cursors) => {
+        // 清除旧的光标
+        cursorContainer.innerHTML = ''
+        
+        // 添加新的光标
+        cursors.forEach(cursor => {
+          const cursorEl = document.createElement('div')
+          cursorEl.style.cssText = `
+            position: absolute;
+            left: ${cursor.position.x}px;
+            top: ${cursor.position.y}px;
+            transform: translate(-2px, -2px);
+            pointer-events: none;
+            z-index: 1001;
+          `
+          
+          // 光标箭头
+          const arrow = document.createElement('div')
+          arrow.style.cssText = `
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 16px solid ${cursor.color};
+            transform: rotate(-45deg);
+          `
+          
+          // 用户名标签
+          const label = document.createElement('div')
+          label.style.cssText = `
+            position: absolute;
+            left: 16px;
+            top: 12px;
+            background: ${cursor.color};
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+          `
+          label.textContent = cursor.userName
+          
+          cursorEl.appendChild(arrow)
+          cursorEl.appendChild(label)
+          cursorContainer.appendChild(cursorEl)
+        })
+      })
+    }
+    
+    console.log('[Canvas] 协作系统已初始化')
+  } catch (error) {
+    console.error('[Canvas] 协作系统初始化失败:', error)
+  }
+}
+
+// 处理远程操作
+const handleRemoteOperation = (operation: any) => {
+  console.log('[Canvas] 收到远程操作:', operation.type, operation.elementId)
+  if (!canvasEngine) return
+  
+  try {
+    switch (operation.type) {
+      case 'add-element':
+        // 添加元素
+        if (operation.data) {
+          canvasEngine.addElement(operation.data)
+        }
+        break
+        
+      case 'delete-element':
+        // 删除元素
+        if (operation.elementId) {
+          canvasEngine.deleteElement(operation.elementId)
+        }
+        break
+        
+      case 'update-element':
+        // 更新元素 - 检查是否被锁定（忽略自己的锁定）
+        if (operation.elementId && operation.data) {
+          const lockingUserId = lockedElements.value.get(operation.elementId)
+          if (lockingUserId && lockingUserId !== currentUserId.value) {
+            console.warn('[Canvas] 元素正在被其他用户操作:', operation.elementId, 'by', lockingUserId)
+            return // 忽略远程更新，因为元素被其他用户锁定
+          }
+          const element = canvasEngine.getElement(operation.elementId)
+          if (element) {
+            Object.assign(element, operation.data)
+            canvasEngine.render()
+          }
+        }
+        break
+        
+      case 'move-element':
+        // 移动元素 - 检查是否被锁定（忽略自己的锁定）
+        if (operation.elementId && operation.data) {
+          const lockingUserId = lockedElements.value.get(operation.elementId)
+          if (lockingUserId && lockingUserId !== currentUserId.value) {
+            console.warn('[Canvas] 元素正在被其他用户操作:', operation.elementId, 'by', lockingUserId)
+            return // 忽略远程移动，因为元素被其他用户锁定
+          }
+          const element = canvasEngine.getElement(operation.elementId)
+          if (element) {
+            element.position = operation.data.position
+            canvasEngine.render()
+          }
+        }
+        break
+        
+      case 'clear-canvas':
+        // 清空画布
+        canvasEngine.clearElements()
+        break
+        
+      case 'lock-element':
+        // 锁定元素
+        if (operation.elementId && operation.data?.userId) {
+          lockedElements.value.set(operation.elementId, operation.data.userId)
+          console.log('[Canvas] 远程锁定元素:', operation.elementId, 'by', operation.data.userId)
+        }
+        break
+        
+      case 'unlock-element':
+        // 解锁元素
+        if (operation.elementId) {
+          lockedElements.value.delete(operation.elementId)
+          console.log('[Canvas] 远程解锁元素:', operation.elementId)
+        }
+        break
+        
+      default:
+        console.log('[Canvas] 未知的远程操作类型:', operation.type)
+    }
+  } catch (error) {
+    console.error('[Canvas] 处理远程操作失败:', error)
+  }
+}
+
+// 广播本地操作到协作频道
+const broadcastOperation = (type: string, data: any, elementId?: string) => {
+  console.log('[Canvas] broadcastOperation 检查:', { 
+    hasManager: !!collaborationManager, 
+    isActive: collaborationManager?.isActive(),
+    type,
+    elementId
+  })
+  if (collaborationManager && collaborationManager.isActive()) {
+    console.log('[Canvas] 广播操作:', type, elementId)
+    collaborationManager.broadcastOperation({
+      id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: type as any,
+      elementId,
+      data
+    })
+  } else {
+    console.log('[Canvas] 未广播操作，协作未激活')
+  }
+}
 
 // 更新画布尺寸
 const updateCanvasSize = () => {
@@ -2174,7 +2464,16 @@ const sendElementToBack = (elementId: string) => {
 // 删除选中的元素
 const deleteSelectedElement = () => {
   if (canvasEngine) {
+    // 获取选中的元素ID列表
+    const selectedIds = canvasEngine.getSelectedElementIds()
+    
+    // 删除元素
     canvasEngine.deleteSelectedElements()
+    
+    // 广播删除操作
+    selectedIds.forEach(id => {
+      broadcastOperation('delete-element', {}, id)
+    })
   }
 }
 
@@ -2240,6 +2539,52 @@ const addTestElements = () => {
   }
 }
 
+// 压力测试功能
+import { stressTester } from '@/core/utils/StressTester'
+
+const stressTestRunning = ref(false)
+const stressTestResult = ref<any>(null)
+
+const runStressTest = async (count: number = 100) => {
+  if (!canvasEngine || stressTestRunning.value) return
+  
+  stressTestRunning.value = true
+  stressTestResult.value = null
+  
+  console.log(`[压力测试] 开始添加 ${count} 个元素...`)
+  
+  try {
+    // 初始化压力测试
+    stressTester.init(canvasEngine)
+    
+    // 运行测试
+    const result = await stressTester.runStressTest({
+      elementCount: count,
+      batchSize: 50,
+      interval: 50
+    })
+    
+    stressTestResult.value = result
+    console.log('[压力测试] 结果:', result)
+    console.log(`[压力测试] 添加耗时: ${result.addDuration.toFixed(2)}ms`)
+    console.log(`[压力测试] 平均渲染: ${result.avgRenderTime.toFixed(4)}ms/元素`)
+    console.log(`[压力测试] FPS: ${result.fps}`)
+    console.log(`[压力测试] 内存: ${(result.memory.used / 1024 / 1024).toFixed(2)}MB`)
+  } catch (error) {
+    console.error('[压力测试] 失败:', error)
+  } finally {
+    stressTestRunning.value = false
+  }
+}
+
+const clearStressTest = () => {
+  if (canvasEngine) {
+    stressTester.clearTestElements()
+    stressTestResult.value = null
+    console.log('[压力测试] 已清除所有测试元素')
+  }
+}
+
 const clearCanvas = () => {
   clearElements()
   if (canvasEngine) {
@@ -2257,6 +2602,16 @@ const toggleSmartGuides = () => {
   smartGuidesEnabled.value = !smartGuidesEnabled.value
   if (canvasEngine) {
     canvasEngine.setSmartGuidesEnabled(smartGuidesEnabled.value)
+  }
+}
+
+// 处理压力测试命令
+const handleStressTestCommand = (command: string) => {
+  if (command === 'clear') {
+    clearStressTest()
+  } else {
+    const count = parseInt(command)
+    runStressTest(count)
   }
 }
 
@@ -2723,6 +3078,12 @@ const imageTextInputData = ref({
   size: { x: 0, y: 0 }
 })
 const imageTextInputRef = ref<HTMLInputElement>()
+
+// 元素锁定状态 Map<elementId, userId>
+const lockedElements = ref(new Map<string, string>())
+
+// 当前用户ID
+const currentUserId = ref('')
 
 // 图片压缩配置
 const compressionConfig = ref({
