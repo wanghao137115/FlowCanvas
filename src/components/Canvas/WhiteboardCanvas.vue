@@ -900,7 +900,7 @@ onMounted(async () => {
     
     // 初始化协作系统
     initCollaboration()
-
+    
     // 延迟再次渲染，确保网格和标尺正确显示
     setTimeout(() => {
       if (canvasEngine) {
