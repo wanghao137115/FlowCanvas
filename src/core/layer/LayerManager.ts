@@ -249,13 +249,6 @@ export class LayerManager {
     }
 
     this.triggerLayersChange()
-    
-    console.log('🎨 LayerManager.duplicateLayer完成', {
-      sourceLayerId: layerId,
-      duplicatedLayerId: duplicatedLayerId,
-      sourceLayerName: sourceLayer.name,
-      duplicatedLayerName: duplicatedLayerName
-    })
 
     return duplicatedLayerId
   }
@@ -266,12 +259,6 @@ export class LayerManager {
   updateLayerElements(layerId: string, elementIds: string[]): void {
     const layer = this.layers.get(layerId)
     if (!layer) return
-
-    console.log('🔄 LayerManager.updateLayerElements', {
-      layerId,
-      elementIdsCount: elementIds.length,
-      elementIds: elementIds
-    })
 
     layer.elements = [...elementIds]
     layer.updatedAt = Date.now()
@@ -285,13 +272,9 @@ export class LayerManager {
     // 暂时禁用防抖，直接执行
     const layer = this.layers.get(layerId)
     if (!layer) return
-
-    console.log('🔄 LayerManager.toggleLayerVisibility', { layerId, beforeVisible: layer.visible })
     
     layer.visible = !layer.visible
     layer.updatedAt = Date.now()
-
-    console.log('🔄 LayerManager.toggleLayerVisibility', { layerId, afterVisible: layer.visible })
 
     // 递归切换子图层可见性
     this.toggleChildrenVisibility(layerId, layer.visible)
@@ -339,14 +322,6 @@ export class LayerManager {
     const layer = this.layers.get(layerId)
     if (!layer) return
 
-    console.log('🔄 LayerManager.moveLayerToPosition', { 
-      layerId, 
-      newOrder, 
-      parentId, 
-      currentParentId: layer.parentId,
-      currentOrder: layer.order 
-    })
-
     // 从原位置移除
     this.layerOrder = this.layerOrder.filter(id => id !== layerId)
     if (layer.parentId) {
@@ -388,7 +363,6 @@ export class LayerManager {
     const layer = this.layers.get(layerId)
     if (!layer) return
 
-    console.log('🔄 置顶图层', { layerId, currentOrder: layer.order, newOrder: 0 })
     // 置顶：order值设为0，在列表最上方
     this.moveLayerToPosition(layerId, 0, layer.parentId)
   }
@@ -401,7 +375,6 @@ export class LayerManager {
     if (!layer) return
 
     const maxOrder = this.getMaxOrder(layer.parentId)
-    console.log('🔄 置底图层', { layerId, currentOrder: layer.order, maxOrder, newOrder: maxOrder + 1 })
     // 置底：order值设为最大值，在列表最下方
     this.moveLayerToPosition(layerId, maxOrder + 1, layer.parentId)
   }
@@ -415,7 +388,7 @@ export class LayerManager {
 
     // 上移：order值减小，在列表中向上移动
     const newOrder = Math.max(0, layer.order - 1)
-    console.log('🔄 上移图层', { layerId, currentOrder: layer.order, newOrder })
+
     this.moveLayerToPosition(layerId, newOrder, layer.parentId)
   }
 
@@ -428,7 +401,6 @@ export class LayerManager {
 
     // 下移：order值增大，在列表中向下移动
     const newOrder = layer.order + 1
-    console.log('🔄 下移图层', { layerId, currentOrder: layer.order, newOrder })
     this.moveLayerToPosition(layerId, newOrder, layer.parentId)
   }
 
@@ -611,12 +583,9 @@ export class LayerManager {
     const parent = this.layers.get(parentId)
     if (!parent) return
 
-    console.log('🔄 toggleChildrenVisibility', { parentId, visible, childrenCount: parent.children.length })
-
     parent.children.forEach(childId => {
       const child = this.layers.get(childId)
       if (child) {
-        console.log('🔄 设置子图层可见性', { childId, visible })
         child.visible = visible
         child.updatedAt = Date.now()
         this.toggleChildrenVisibility(childId, visible)
