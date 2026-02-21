@@ -472,9 +472,196 @@ channel.onmessage = (event) => {
 **答：**
 1. **全局错误监控**：`window.onerror`
 2. **Promise 异常捕获**：`unhandledrejection`
-3. **性能监控**：FP、FCP、LCP
+3. **PerformanceObserver 性能监控**
 4. **资源加载错误监控**
 5. **接口成功率监控**
+
+---
+
+### 19.1 PerformanceObserver 在项目中如何收集用户性能信息？
+
+**答：**
+使用 `PerformanceObserver` API 收集页面性能数据，这是现代浏览器提供的性能监控接口。
+
+**项目中实际使用方式：**
+
+```typescript
+// 性能监控
+import { 
+  performanceMonitor, 
+  webVitalsCollector, 
+  whiteboardPerfMonitor 
+} from './core/utils/PerformanceMonitor'
+
+// 初始化 Web Vitals 收集器
+webVitalsCollector.init((metrics) => {
+  console.log('[WebVitals] 上报性能指标:', metrics)
+  // 可以在这里将指标发送到后端
+})
+
+// 初始化白板性能监控（FPS 等）
+whiteboardPerfMonitor.startFPSMonitor()
+
+// 页面卸载时生成性能报告
+window.addEventListener('beforeunload', () => {
+  console.log('[Performance] 页面卸载 - 性能报告:')
+  console.log(whiteboardPerfMonitor.generateReport())
+  whiteboardPerfMonitor.stopFPSMonitor()
+  webVitalsCollector.destroy()
+})
+```
+
+**WebVitals 性能指标收集：**
+
+```typescript
+// 1. 初始化性能监控
+const performanceObserver = new PerformanceObserver((list) => {
+  for (const entry of list.getEntries()) {
+    // 上报性能数据
+    reportPerformance({
+      name: entry.name,
+      entryType: entry.entryType,
+      startTime: entry.startTime,
+      duration: entry.duration,
+    })
+  }
+})
+
+// 2. 观察不同类型的性能指标
+performanceObserver.observe({ entryTypes: ['measure', 'navigation', 'resource', 'paint', 'longtask'] })
+
+// 3. 常用性能指标收集
+// FP (First Paint) - 首次绘制
+// FCP (First Contentful Paint) - 首次内容绘制
+// LCP (Largest Contentful Paint) - 最大内容绘制
+// CLS (Cumulative Layout Shift) - 累计布局偏移
+// FID (First Input Delay) - 首次输入延迟
+// TBT (Total Blocking Time) - 总阻塞时间
+```
+
+**在白板项目中的具体应用：**
+
+```typescript
+// 白板性能监控模块
+class WhiteboardPerformanceMonitor {
+  private metrics = {
+    fps: 0,
+    renderTime: 0,
+    interactionDelay: 0,
+    memoryUsage: 0
+  }
+
+  init() {
+    // 1. 监控 FPS
+    this.monitorFPS()
+    
+    // 2. 监控渲染性能
+    this.monitorRenderPerformance()
+    
+    // 3. 监控用户交互延迟
+    this.monitorInteractionDelay()
+    
+    // 4. 监控内存使用
+    this.monitorMemory()
+  }
+
+  private monitorFPS() {
+    let lastTime = performance.now()
+    let frames = 0
+    
+    const loop = () => {
+      frames++
+      const currentTime = performance.now()
+      
+      if (currentTime >= lastTime + 1000) {
+        this.metrics.fps = Math.round((frames * 1000) / (currentTime - lastTime))
+        
+        // FPS 过低时告警
+        if (this.metrics.fps < 30) {
+          console.warn(`FPS过低: ${this.metrics.fps}`)
+        }
+        
+        frames = 0
+        lastTime = currentTime
+      }
+      
+      requestAnimationFrame(loop)
+    }
+    
+    requestAnimationFrame(loop)
+  }
+
+  private monitorRenderPerformance() {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.entryType === 'measure') {
+          this.metrics.renderTime = entry.duration
+          
+          // 渲染时间过长时告警
+          if (entry.duration > 16) {
+            console.warn(`渲染耗时过长: ${entry.duration}ms`)
+          }
+        }
+      }
+    })
+    
+    observer.observe({ entryTypes: ['measure'] })
+  }
+
+  private monitorInteractionDelay() {
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        // 记录首次输入延迟
+        if (entry.entryType === 'first-input') {
+          this.metrics.interactionDelay = entry.processingStart - entry.startTime
+        }
+      }
+    })
+    
+    observer.observe({ entryTypes: ['first-input'] })
+  }
+
+  private monitorMemory() {
+    // 需要浏览器支持 memory API
+    if ('memory' in performance) {
+      setInterval(() => {
+        const memory = (performance as any).memory
+        this.metrics.memoryUsage = {
+          usedJSHeapSize: memory.usedJSHeapSize,
+          totalJSHeapSize: memory.totalJSHeapSize,
+          jsHeapSizeLimit: memory.jsHeapSizeLimit
+        }
+      }, 5000)
+    }
+  }
+
+  getMetrics() {
+    return this.metrics
+  }
+}
+```
+
+**使用示例：**
+
+```typescript
+// 在项目入口初始化
+const monitor = new WhiteboardPerformanceMonitor()
+monitor.init()
+
+// 渲染性能测量
+function measureRender(name: string, fn: () => void) {
+  performance.mark(`${name}-start`)
+  fn()
+  performance.mark(`${name}-end`)
+  performance.measure(name, `${name}-start`, `${name}-end`)
+}
+```
+
+**优势：**
+- 无侵入性：不影响页面性能
+- 实时性：可实时监控性能变化
+- 准确性：基于浏览器原生 API，数据准确
+- 可定制：可根据业务需求监控特定指标
 
 ---
 

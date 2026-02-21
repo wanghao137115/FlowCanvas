@@ -5,7 +5,14 @@ import 'element-plus/dist/index.css'
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 
-// ============ 错误监控收集 ============
+// 性能监控
+import { 
+  performanceMonitor, 
+  webVitalsCollector, 
+  whiteboardPerfMonitor 
+} from './core/utils/PerformanceMonitor'
+
+// './core/utils/ ============ 错误监控收集 ============
 // 收集未捕获的错误
 window.onerror = (message, source, lineno, colno, error) => {
   console.error('[错误监控]', { message, source, lineno, colno, error })
@@ -18,6 +25,30 @@ window.onunhandledrejection = (event) => {
   console.error('[Promise错误监控]', event.reason)
 }
 
+// ============ PerformanceObserver 性能监控 ============
+// 初始化 Web Vitals 收集器
+webVitalsCollector.init((metrics) => {
+  console.log('[WebVitals] 上报性能指标:', metrics)
+  // 可以在这里将指标发送到后端
+  // fetch('/api/metrics', { method: 'POST', body: JSON.stringify(metrics) })
+})
+
+// 初始化白板性能监控（FPS 等）
+whiteboardPerfMonitor.startFPSMonitor()
+
+// 页面卸载时生成性能报告
+window.addEventListener('beforeunload', () => {
+  console.log('[Performance] 页面卸载 - 性能报告:')
+  console.log(whiteboardPerfMonitor.generateReport())
+  
+  // 上报最终性能数据
+  const perfData = whiteboardPerfMonitor.exportData()
+  console.log('[Performance] 导出性能数据:', perfData)
+  
+  whiteboardPerfMonitor.stopFPSMonitor()
+  webVitalsCollector.destroy()
+})
+
 // 性能监控 - 记录页面加载时间
 window.addEventListener('load', () => {
   const perfData = performance.timing
@@ -29,13 +60,16 @@ window.addEventListener('load', () => {
   paintEntries.forEach(entry => {
     console.log(`[性能监控] ${entry.name}: ${entry.startTime}ms`)
   })
+  
+  // 收集资源加载性能
+  webVitalsCollector.collectResourceTiming()
 })
 
 // ============ 测试：手动触发错误来验证监控 ============
-setTimeout(() => {
-  console.log('[监控测试] 准备触发测试错误...')
-  throw new Error('【测试错误】这是手动触发的错误，用于验证监控是否正常工作')
-}, 3000)
+// setTimeout(() => {
+//   console.log('[监控测试] 准备触发测试错误...')
+//   throw new Error('【测试错误】这是手动触发的错误，用于验证监控是否正常工作')
+// }, 3000)
 // =======================================================
 
 const app = createApp(App)
