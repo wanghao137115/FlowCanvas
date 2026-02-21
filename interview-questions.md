@@ -85,6 +85,15 @@ src/
 7. **离屏 Canvas 优化**
    - 复杂元素先在离屏 Canvas 绘制，再复制到主画布
 
+8. **使用PerformanceObserver收集用户信息**
+   - const observer = new PerformanceObserver((list) => {
+    list.getEntries().forEach(entry => {
+        console.log(entry.name,entry.startTime,entry.duration)
+    });
+});
+
+observer.observe({ entryTypes: ['xxx'] });
+
 ---
 
 ### 5. 基于变换矩阵如何实现视口管理？
