@@ -353,18 +353,20 @@ export class Renderer {
   }
 
   /**
-   * 计算元素的连接点
+   * 计算元素的连接点（虚拟坐标）
+   * 注意：此时 ctx 已经被 applyTransform 处理过，应该直接使用虚拟坐标
    */
   private calculateConnectionPoints(element: CanvasElement): Vector2[] {
     const { position, size } = element
+    
     const centerX = position.x + size.x / 2
     const centerY = position.y + size.y / 2
     
-    // 四个边的中心点
+    // 四个边的中心点（虚拟坐标）
     return [
       { x: centerX, y: position.y },           // 上
-      { x: position.x + size.x, y: centerY },   // 右
-      { x: centerX, y: position.y + size.y },  // 下
+      { x: position.x + size.x, y: centerY }, // 右
+      { x: centerX, y: position.y + size.y }, // 下
       { x: position.x, y: centerY }            // 左
     ]
   }
@@ -385,6 +387,7 @@ export class Renderer {
 
   /**
    * 渲染连接点
+   * 注意：此时 ctx 变换已恢复，需要将虚拟坐标转换为屏幕坐标
    */
   renderConnectionPoints(): void {
     if (!this.hoveredElement || this.connectionPoints.length === 0) {
@@ -394,7 +397,7 @@ export class Renderer {
     this.ctx.save()
     
     this.connectionPoints.forEach(point => {
-      // 将世界坐标转换为屏幕坐标
+      // 将虚拟坐标转换为屏幕坐标
       const screenPoint = this.coordinateTransformer.virtualToScreen(point)
       
       const isHovered = this.hoveredConnectionPoint && 
@@ -551,26 +554,33 @@ export class Renderer {
 
   /**
    * 渲染单个元素
+   * 注意：此时 ctx 已经被 applyTransform 处理过，应该直接使用虚拟坐标
    */
   renderElement(element: CanvasElement): void {
     if (!element.visible) {
       return
     }
     
-    // 获取屏幕坐标
-    const screenPos = this.coordinateTransformer.virtualToScreen(element.position)
-    const screenSize = this.coordinateTransformer.virtualToScreenSize(element.size)
+    // 直接使用虚拟坐标，applyTransform 会自动处理变换
+    const x = element.position.x
+    const y = element.position.y
+    const width = element.size.x
+    const height = element.size.y
     
     // LOD 优化：极低细节级别时，跳过太小的元素
-    if (this.lodLevel === 'low' && (screenSize.x < 2 || screenSize.y < 2)) {
+    // 需要手动计算屏幕尺寸来判断
+    const scale = this.viewportManager.getViewport().scale
+    const screenW = width * scale
+    const screenH = height * scale
+    if (this.lodLevel === 'low' && (screenW < 2 || screenH < 2)) {
       return
     }
     
     this.ctx.save()
 
-    // 计算元素中心点（屏幕坐标）
-    const centerX = screenPos.x + screenSize.x / 2
-    const centerY = screenPos.y + screenSize.y / 2
+    // 计算元素中心点（虚拟坐标，applyTransform 会自动转换）
+    const centerX = x + width / 2
+    const centerY = y + height / 2
 
     // 移动到元素中心点
     this.ctx.translate(centerX, centerY)
@@ -581,7 +591,7 @@ export class Renderer {
     }
 
     // 移动到元素的左上角（相对于中心点）
-    this.ctx.translate(-screenSize.x / 2, -screenSize.y / 2)
+    this.ctx.translate(-width / 2, -height / 2)
 
     // LOD 优化：低细节级别时不使用离屏缓存，直接绘制简化版本
     const useCache = (element.type === 'shape' || element.type === 'text') && this.lodLevel !== 'low'
@@ -598,19 +608,19 @@ export class Renderer {
 
       const cacheCanvas = cacheEntry.canvas
 
-      // 将离屏 Canvas 绘制到主画布（这里已经在元素坐标系下，只需画内容）
-      this.ctx.drawImage(cacheCanvas, 0, 0, screenSize.x, screenSize.y)
+      // 将离屏 Canvas 绘制到主画布（虚拟坐标）
+      this.ctx.drawImage(cacheCanvas, 0, 0, width, height)
     } else if (this.lodLevel === 'low') {
       // LOD 低细节：绘制简化版本（只有填充矩形）
-      this.renderElementLowDetail(element, screenSize)
+      this.renderElementLowDetail(element, { x: width, y: height })
     } else {
       // 其它类型保持原有渲染路径
       switch (element.type) {
         case 'shape':
-          this.renderShapeElement(element)
+          this.renderShapeElement(element, { x: width, y: height })
           break
         case 'text':
-          this.renderTextElement(element)
+          this.renderTextElement(element, { x: width, y: height })
           break
         case 'path':
           this.renderPathElement(element)
@@ -674,12 +684,14 @@ export class Renderer {
     this.ctx = offCtx
 
     try {
+      // 离屏 Canvas 使用虚拟尺寸绘制
+      const virtualSize = { x: width, y: height }
       switch (element.type) {
         case 'shape':
-          this.renderShapeElement(element)
+          this.renderShapeElement(element, virtualSize)
           break
         case 'text':
-          this.renderTextElement(element)
+          this.renderTextElement(element, virtualSize)
           break
       }
     } finally {
@@ -778,9 +790,9 @@ export class Renderer {
   /**
    * 渲染形状元素
    */
-  private renderShapeElement(element: CanvasElement): void {
-    const width = element.size.x
-    const height = element.size.y
+  private renderShapeElement(element: CanvasElement, screenSize: { x: number; y: number }): void {
+    const width = screenSize.x
+    const height = screenSize.y
     const style = element.style
     const shapeType = element.data?.shapeType || element.data?.shape || ShapeType.RECTANGLE
 
@@ -924,9 +936,9 @@ export class Renderer {
   /**
    * 渲染文本元素
    */
-  private renderTextElement(element: CanvasElement): void {
-    const width = element.size.x
-    const height = element.size.y
+  private renderTextElement(element: CanvasElement, screenSize: { x: number; y: number }): void {
+    const width = screenSize.x
+    const height = screenSize.y
     const style = element.style
 
     // 应用元素样式（包括填充颜色）
@@ -1754,8 +1766,6 @@ export class Renderer {
     this.ctx.lineWidth = 1
     this.ctx.setLineDash([])
 
-    // 使用扩展的画布边界
-    const canvasBounds = this.getCanvasBounds()
     const canvasWidth = this.canvas.width
     const canvasHeight = this.canvas.height
     
@@ -1765,20 +1775,13 @@ export class Renderer {
     const viewportRight = viewport.offset.x + canvasWidth / viewport.scale
     const viewportBottom = viewport.offset.y + canvasHeight / viewport.scale
     
-    // 优化网格渲染范围，控制性能
-    const margin = Math.min(500, Math.max(canvasWidth, canvasHeight) / viewport.scale) // 限制边距，控制性能
-    
-    // 计算网格渲染范围，确保覆盖整个可见区域
-    const renderStartX = Math.floor((viewportLeft - margin) / gridSize) * gridSize
-    const renderStartY = Math.floor((viewportTop - margin) / gridSize) * gridSize
-    const renderEndX = viewportRight + margin
-    const renderEndY = viewportBottom + margin
-    
-    // 预渲染整个3.0k画布的网格
-    const startX = -3000
-    const startY = -3000
-    const endX = 3000
-    const endY = 3000
+    // 根据视口位置动态计算网格渲染范围，确保覆盖整个可见区域
+    // 向外扩展一个屏幕的宽度，保证滚动时网格连续
+    const margin = canvasWidth / viewport.scale
+    const startX = Math.floor((viewportLeft - margin) / gridSize) * gridSize
+    const startY = Math.floor((viewportTop - margin) / gridSize) * gridSize
+    const endX = Math.ceil((viewportRight + margin) / gridSize) * gridSize
+    const endY = Math.ceil((viewportBottom + margin) / gridSize) * gridSize
 
     const verticalLines = Math.floor((endX - startX) / gridSize) + 1
     const horizontalLines = Math.floor((endY - startY) / gridSize) + 1
@@ -1888,11 +1891,15 @@ export class Renderer {
       interval = Math.max(1, minScreenInterval / scale)
     }
 
-    // 预渲染整个3.0k画布的顶部标尺
-    const startX = -3000
-    const endX = 3000
+    // 根据视口位置动态计算标尺渲染范围
+    const canvasWidth = this.canvas.width
+    const canvasHeight = this.canvas.height
+    const rulerStartX = Math.floor((viewport.offset.x - canvasWidth / scale) / interval) * interval
+    const rulerEndX = Math.ceil((viewport.offset.x + canvasWidth / scale) / interval) * interval
+    const rulerStartY = Math.floor((viewport.offset.y - canvasHeight / scale) / interval) * interval
+    const rulerEndY = Math.ceil((viewport.offset.y + canvasHeight / scale) / interval) * interval
     
-    for (let x = startX; x <= endX; x += interval) {
+    for (let x = rulerStartX; x <= rulerEndX; x += interval) {
       const screenX = rulerSize + (x - viewport.offset.x) * scale  // 修复：减去偏移而不是加上
       if (screenX >= rulerSize && screenX <= this.canvas.width) {
         const value = Math.round(x)
@@ -1902,11 +1909,7 @@ export class Renderer {
       }
     }
 
-    // 预渲染整个3.0k画布的左侧标尺
-    const startY = -3000
-    const endY = 3000
-    
-    for (let y = startY; y <= endY; y += interval) {
+    for (let y = rulerStartY; y <= rulerEndY; y += interval) {
       const screenY = rulerSize + (y - viewport.offset.y) * scale  // 修复：减去偏移而不是加上
       if (screenY >= rulerSize && screenY <= this.canvas.height) {
         this.ctx.save()
@@ -2014,6 +2017,7 @@ export class Renderer {
 
   /**
    * 渲染覆盖层（选中元素高亮等）
+   * 注意：此时 ctx 变换已恢复，需要使用屏幕坐标
    */
   renderOverlay(isInternalUpdate: boolean = false): void {
     if (this.selectedElements.length === 0) return
@@ -2035,12 +2039,9 @@ export class Renderer {
         return
       }
 
-      // 转换到屏幕坐标
+      // 将虚拟坐标转换为屏幕坐标
       const screenPos = this.coordinateTransformer.virtualToScreen(element.position)
-      const screenSize = this.coordinateTransformer.virtualToScreen({
-        x: element.size.x,
-        y: element.size.y
-      })
+      const screenSize = this.coordinateTransformer.virtualToScreenSize(element.size)
 
       this.ctx.save()
 

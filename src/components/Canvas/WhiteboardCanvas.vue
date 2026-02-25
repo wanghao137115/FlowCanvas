@@ -2488,8 +2488,9 @@ const toggleStyleBrush = () => {
 const zoomIn = () => {
   if (canvasEngine) {
     const currentScale = canvasEngine.getViewportManager().getViewport().scale
-    const newScale = Math.min(5, currentScale + 0.1)
-    canvasEngine.getViewportManager().zoom(newScale)
+    // 移除缩放上限限制，使用 zoomTo 设置绝对值
+    const newScale = currentScale + 0.1
+    canvasEngine.getViewportManager().zoomTo(newScale)
     // 同步更新store状态
     zoomTo(newScale)
   }
@@ -2498,8 +2499,9 @@ const zoomIn = () => {
 const zoomOut = () => {
   if (canvasEngine) {
     const currentScale = canvasEngine.getViewportManager().getViewport().scale
-    const newScale = Math.max(0.1, currentScale - 0.1)
-    canvasEngine.getViewportManager().zoom(newScale)
+    // 移除缩放下限限制，使用 zoomTo 设置绝对值
+    const newScale = Math.max(0.0001, currentScale - 0.1)
+    canvasEngine.getViewportManager().zoomTo(newScale)
     // 同步更新store状态
     zoomTo(newScale)
   }

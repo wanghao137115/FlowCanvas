@@ -1528,14 +1528,42 @@ export class CanvasEngine {
   private handleWheel(event: WheelEvent): void {
     event.preventDefault()
 
+    // 滚动时隐藏浮动工具栏
+    if (this.onFloatingToolbarVisibilityChange) {
+      this.onFloatingToolbarVisibilityChange(false)
+    }
+
     const rect = this.canvas.getBoundingClientRect()
     const position: Vector2 = {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     }
 
-    const delta = event.deltaY > 0 ? 0.95 : 1.05
-    this.viewportManager.zoom(delta, position)
+    // 计算缩放系数：根据 deltaY 的数值来调整缩放速度
+    // 不同的鼠标和操作系统 deltaY 值差异很大，需要归一化处理
+    const deltaY = event.deltaY
+    let zoomFactor: number
+    
+    if (Math.abs(deltaY) < 10) {
+      // 小幅度滚动（精确鼠标/触控板）
+      zoomFactor = deltaY > 0 ? 0.95 : 1.05
+    } else if (Math.abs(deltaY) < 50) {
+      // 中等幅度滚动
+      zoomFactor = deltaY > 0 ? 0.90 : 1.10
+    } else {
+      // 大幅度滚动（普通鼠标）- 使用更大的缩放幅度
+      zoomFactor = deltaY > 0 ? 0.80 : 1.25
+    }
+
+    // 将屏幕坐标转换为虚拟坐标，作为缩放中心点
+    const virtualCenterPoint = this.viewportManager.getCoordinateTransformer().screenToVirtual(position)
+    
+    // 打印调试信息
+    console.log('[缩放中心] 鼠标屏幕位置:', { x: position.x.toFixed(2), y: position.y.toFixed(2) })
+    console.log('[缩放中心] 对应虚拟位置:', { x: virtualCenterPoint.x.toFixed(2), y: virtualCenterPoint.y.toFixed(2) })
+    console.log('[缩放中心] 当前scale:', this.viewportManager.getViewport().scale.toFixed(4))
+    
+    this.viewportManager.zoom(zoomFactor, virtualCenterPoint)
     
     // 缩放后使视口缓存失效
     this.invalidateViewportCache()
@@ -1702,14 +1730,9 @@ export class CanvasEngine {
     ctx.fillStyle = this.settings.backgroundColor
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
 
-    // 渲染网格（在视口变换之前，确保网格在标尺下方）
+    // 渲染网格（在视口变换之前）
     if (this.settings.gridVisible) {
       this.renderer.renderGrid()
-    }
-
-    // 渲染标尺（在视口变换之前，确保标尺位置固定，在网格之上）
-    if (this.settings.rulersVisible) {
-      this.renderer.renderRulers()
     }
 
     // 应用视口变换
@@ -1717,6 +1740,14 @@ export class CanvasEngine {
 
     // 按图层顺序渲染元素
     this.renderElementsByLayer()
+
+    // 恢复视口变换（让标尺使用屏幕坐标）
+    this.viewportManager.restoreTransform(ctx)
+
+    // 渲染标尺（在元素之后，确保元素在标尺之上）
+    if (this.settings.rulersVisible) {
+      this.renderer.renderRulers()
+    }
 
     // 更新箭头工具的元素列表（用于吸附功能）
     const arrowTool = this.toolManager.getTool(ToolType.ARROW)
@@ -1739,14 +1770,19 @@ export class CanvasEngine {
     // 渲染工具预览（使用屏幕坐标，确保在最顶层）
     this.toolManager.render(ctx)
     
-    // 渲染选中元素高亮和其他覆盖层
-    this.renderer.renderOverlay(this.isInternalUpdate)
+    // 缩放时不渲染覆盖层UI（选框、手柄、连接点），提升性能
+    const isZooming = this.viewportManager.getIsZooming()
     
-    // 渲染变换手柄
-    this.renderTransformHandles(ctx)
-    
-    // 渲染连接点（在最后渲染，确保在最上层）
-    this.renderer.renderConnectionPoints()
+    if (!isZooming) {
+      // 渲染选中元素高亮和其他覆盖层
+      this.renderer.renderOverlay(this.isInternalUpdate)
+      
+      // 渲染变换手柄
+      this.renderTransformHandles(ctx)
+      
+      // 渲染连接点（在最后渲染，确保在最上层）
+      this.renderer.renderConnectionPoints()
+    }
     
     // 渲染连接线（拖拽时）
     this.renderer.renderConnectionLine()

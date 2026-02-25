@@ -20,22 +20,39 @@ export class CoordinateTransformer {
   }
 
   /**
-   * 屏幕坐标转虚拟坐�?
+   * 屏幕坐标转虚拟坐标
+   * 与 applyTransform 一致: x' = scale * x - offset * scale
    */
   screenToVirtual(screenPos: Vector2): Vector2 {
     return {
-      x: (screenPos.x - this.viewport.offset.x) / this.viewport.scale,
-      y: (screenPos.y - this.viewport.offset.y) / this.viewport.scale
+      x: screenPos.x / this.viewport.scale + this.viewport.offset.x,
+      y: screenPos.y / this.viewport.scale + this.viewport.offset.y
     }
   }
 
   /**
-   * 虚拟坐标转屏幕坐�?
+   * 虚拟坐标转屏幕坐标
+   * 与 applyTransform 一致: x' = scale * x - offset * scale
+   * 即: screenX = (virtualX - offsetX) * scale
    */
   virtualToScreen(virtualPos: Vector2): Vector2 {
     return {
-      x: virtualPos.x * this.viewport.scale + this.viewport.offset.x,
-      y: virtualPos.y * this.viewport.scale + this.viewport.offset.y
+      x: (virtualPos.x - this.viewport.offset.x) * this.viewport.scale,
+      y: (virtualPos.y - this.viewport.offset.y) * this.viewport.scale
+    }
+  }
+
+  /**
+   * 虚拟边界转屏幕边界
+   */
+  virtualToScreenBounds(virtualBounds: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number } {
+    const topLeft = this.virtualToScreen({ x: virtualBounds.x, y: virtualBounds.y })
+    const bottomRight = this.virtualToScreen({ x: virtualBounds.x + virtualBounds.width, y: virtualBounds.y + virtualBounds.height })
+    return {
+      x: topLeft.x,
+      y: topLeft.y,
+      width: bottomRight.x - topLeft.x,
+      height: bottomRight.y - topLeft.y
     }
   }
 
@@ -106,14 +123,19 @@ export class CoordinateTransformer {
   }
 
   /**
-   * 将虚拟坐标区域适配到视�?
+   * 将虚拟坐标区域适配到视口
    */
   fitToViewport(bounds: { x: number; y: number; width: number; height: number }, padding: number = 50): void {
     const scaleX = (this.viewport.width - padding * 2) / bounds.width
     const scaleY = (this.viewport.height - padding * 2) / bounds.height
-    const scale = Math.min(scaleX, scaleY, 5) // 最大缩�?�?
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+    let scale = Math.min(scaleX, scaleY)
+    if (scale < minScale) scale = minScale
+    if (scale > maxScale) scale = maxScale
 
-    this.viewport.scale = Math.max(0.1, scale) // 最小缩�?.1�?
+    this.viewport.scale = scale
 
     // 计算居中偏移
     const scaledWidth = bounds.width * this.viewport.scale
@@ -138,14 +160,19 @@ export class CoordinateTransformer {
   }
 
   /**
-   * 设置缩放级别（以指定点为中心�?
+   * 设置缩放级别（以指定点为中心）
    */
   setScale(scale: number, centerPoint?: Vector2): void {
     const oldScale = this.viewport.scale
-    const newScale = Math.max(0.1, Math.min(5, scale))
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+    let newScale = scale
+    if (newScale < minScale) newScale = minScale
+    if (newScale > maxScale) newScale = maxScale
 
     if (centerPoint) {
-      // 以指定点为中心缩�?
+      // 以指定点为中心缩放
       const scaleRatio = newScale / oldScale
       this.viewport.offset.x = centerPoint.x - (centerPoint.x - this.viewport.offset.x) * scaleRatio
       this.viewport.offset.y = centerPoint.y - (centerPoint.y - this.viewport.offset.y) * scaleRatio
