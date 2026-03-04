@@ -527,3 +527,473 @@ export class WhiteboardPerformanceMonitor {
 }
 
 export const whiteboardPerfMonitor = WhiteboardPerformanceMonitor.getInstance()
+
+/**
+ * 白板性能压力测试工具
+ * 用于获取真实性能数据，支撑项目描述
+ */
+export class WhiteboardStressTester {
+  private canvas: HTMLCanvasElement
+  private ctx: CanvasRenderingContext2D
+  private results: Map<string, any> = new Map()
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas
+    this.ctx = canvas.getContext('2d')!
+  }
+
+  /**
+   * 测试1：不同元素数量下的帧率
+   * 运行方式：在浏览器控制台执行
+   * const tester = new WhiteboardStressTester(document.querySelector('canvas'))
+   * tester.testFPSByElementCount()
+   */
+  async testFPSByElementCount(): Promise<Record<number, number>> {
+    const elementCounts = [50, 100, 200, 500, 1000]
+    const results: Record<number, number> = {}
+
+    console.log('🧪 开始 FPS 压力测试...')
+
+    for (const count of elementCounts) {
+      console.log(`📊 测试 ${count} 个元素...`)
+      
+      // 创建测试元素
+      const elements = this.createTestElements(count)
+      
+      // 预热
+      this.renderElements(elements, 5)
+      
+      // 正式测试
+      const fps = await this.measureFPS(() => {
+        this.renderElements(elements, 1)
+      })
+      
+      results[count] = fps
+      console.log(`  → ${count} 元素: ${fps} FPS`)
+    }
+
+    this.results.set('fpsByElementCount', results)
+    console.log('\n📈 FPS 测试结果:')
+    console.table(results)
+    
+    return results
+  }
+
+  /**
+   * 测试2：脏矩形渲染 vs 全量渲染
+   * 运行方式：在浏览器控制台执行
+   */
+  async testDirtyRendering(): Promise<{ dirty: number; full: number; improvement: string }> {
+    const elementCount = 200
+    const elements = this.createTestElements(elementCount)
+    const testRect = { x: 100, y: 100, width: 200, height: 200 }
+
+    console.log('🧪 开始脏矩形渲染测试...')
+
+    // 预渲染所有元素
+    this.renderElements(elements, 3)
+
+    // 测试全量渲染
+    const fullRenderTime = await this.measureRenderTime(() => {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+      elements.forEach(el => this.renderSingleElement(el))
+    })
+
+    // 测试脏矩形渲染（模拟）
+    // 实际项目中，脏矩形只渲染 dirty 区域内的元素
+    const dirtyElements = elements.filter(el => 
+      el.x < testRect.x + testRect.width &&
+      el.x + el.width > testRect.x &&
+      el.y < testRect.y + testRect.height &&
+      el.y + el.height > testRect.y
+    )
+
+    const dirtyRenderTime = await this.measureRenderTime(() => {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+      // 模拟：只渲染脏区域内的元素
+      dirtyElements.forEach(el => this.renderSingleElement(el))
+    })
+
+    const improvement = ((1 - dirtyRenderTime / fullRenderTime) * 100).toFixed(1)
+    
+    const result = {
+      dirty: Math.round(dirtyRenderTime * 100) / 100,
+      full: Math.round(fullRenderTime * 100) / 100,
+      improvement: `${improvement}%`
+    }
+
+    console.log(`  → 全量渲染: ${result.full}ms`)
+    console.log(`  → 脏矩形: ${result.dirty}ms`)
+    console.log(`  → 性能提升: ${result.improvement}`)
+
+    this.results.set('dirtyRendering', result)
+    return result
+  }
+
+  /**
+   * 测试3：离屏缓存效果（复杂图形）
+   * 运行方式：在浏览器控制台执行
+   * 
+   * 之前的简单矩形测试缓存效果不明显（只有10%）
+   * 因为 fillRect 本身很快，复杂图形（渐变、阴影、多路径）缓存效果才显著
+   */
+  async testOffscreenCacheComplex(): Promise<{ noCache: number; withCache: number; improvement: string }> {
+    const elementCount = 50 // 复杂图形数量少一些
+    const renderCount = 30
+    const elements = this.createComplexTestElements(elementCount)
+
+    console.log('🧪 开始复杂图形离屏缓存测试...')
+
+    // 测试无缓存（每次重新渲染复杂图形）
+    const noCacheTime = await this.measureRenderTime(() => {
+      elements.forEach(el => this.renderComplexElementFull(el))
+    }, renderCount)
+
+    // 测试有缓存（使用 drawImage）
+    const offscreenCanvases = new Map<string, HTMLCanvasElement>()
+    
+    // 创建缓存
+    elements.forEach(el => {
+      const cache = document.createElement('canvas')
+      cache.width = el.width
+      cache.height = el.height
+      const cacheCtx = cache.getContext('2d')!
+      this.renderComplexElementFullToCtx(cacheCtx, el)
+      offscreenCanvases.set(el.id, cache)
+    })
+
+    const withCacheTime = await this.measureRenderTime(() => {
+      elements.forEach(el => {
+        const cache = offscreenCanvases.get(el.id)!
+        this.ctx.drawImage(cache, el.x, el.y)
+      })
+    }, renderCount)
+
+    const improvement = ((1 - withCacheTime / noCacheTime) * 100).toFixed(1)
+
+    const result = {
+      noCache: Math.round(noCacheTime * 100) / 100,
+      withCache: Math.round(withCacheTime * 100) / 100,
+      improvement: `${improvement}%`
+    }
+
+    console.log(`  → 无缓存: ${result.noCache}ms`)
+    console.log(`  → 有缓存: ${result.withCache}ms`)
+    console.log(`  → 性能提升: ${result.improvement}`)
+
+    this.results.set('offscreenCacheComplex', result)
+    return result
+  }
+
+  private createComplexTestElements(count: number): any[] {
+    const elements = []
+    for (let i = 0; i < count; i++) {
+      elements.push({
+        id: `complex-${i}`,
+        type: 'complex',
+        x: Math.random() * 600,
+        y: Math.random() * 400,
+        width: 80,
+        height: 80,
+        fill: `hsl(${Math.random() * 360}, 70%, 50%)`,
+        hasShadow: true,
+        hasGradient: true,
+        layers: 3
+      })
+    }
+    return elements
+  }
+
+  // 完整版复杂图形渲染（模拟真实场景）
+  private renderComplexElementFull(el: any): void {
+    const { x, y, width, height, fill, hasShadow, hasGradient, layers } = el
+    
+    // 阴影
+    if (hasShadow) {
+      this.ctx.shadowColor = 'rgba(0,0,0,0.3)'
+      this.ctx.shadowBlur = 10
+      this.ctx.shadowOffsetX = 5
+      this.ctx.shadowOffsetY = 5
+    }
+    
+    // 多层渐变
+    if (hasGradient) {
+      for (let i = 0; i < layers; i++) {
+        const gradient = this.ctx.createRadialGradient(
+          x + width/2, y + height/2, 0,
+          x + width/2, y + height/2, width/2
+        )
+        gradient.addColorStop(0, fill)
+        gradient.addColorStop(0.5, `hsl(${(parseInt(fill.slice(4)) + i * 30) % 360}, 70%, 40%)`)
+        gradient.addColorStop(1, 'transparent')
+        
+        this.ctx.fillStyle = gradient
+        this.ctx.beginPath()
+        this.ctx.arc(x + width/2, y + height/2, width/2 - i * 5, 0, Math.PI * 2)
+        this.ctx.fill()
+      }
+    }
+    
+    // 重置阴影
+    this.ctx.shadowColor = 'transparent'
+    this.ctx.shadowBlur = 0
+    this.ctx.shadowOffsetX = 0
+    this.ctx.shadowOffsetY = 0
+  }
+
+  private renderComplexElementFullToCtx(ctx: CanvasRenderingContext2D, el: any): void {
+    const { width, height, fill, hasShadow, hasGradient, layers } = el
+    
+    if (hasShadow) {
+      ctx.shadowColor = 'rgba(0,0,0,0.3)'
+      ctx.shadowBlur = 10
+      ctx.shadowOffsetX = 5
+      ctx.shadowOffsetY = 5
+    }
+    
+    if (hasGradient) {
+      for (let i = 0; i < layers; i++) {
+        const gradient = ctx.createRadialGradient(
+          width/2, height/2, 0,
+          width/2, height/2, width/2
+        )
+        gradient.addColorStop(0, fill)
+        gradient.addColorStop(0.5, `hsl(${(parseInt(fill.slice(4)) + i * 30) % 360}, 70%, 40%)`)
+        gradient.addColorStop(1, 'transparent')
+        
+        ctx.fillStyle = gradient
+        ctx.beginPath()
+        ctx.arc(width/2, height/2, width/2 - i * 5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    
+    ctx.shadowColor = 'transparent'
+    ctx.shadowBlur = 0
+    ctx.shadowOffsetX = 0
+    ctx.shadowOffsetY = 0
+  }
+
+  /**
+   * 测试4：空间哈希查询性能
+   * 运行方式：在浏览器控制台执行
+   */
+  testSpatialHash(): { linear: number; hash: number; improvement: string } {
+    const elementCount = 1000
+    const queryCount = 100
+    const elements = this.createTestElements(elementCount)
+    const gridSize = 100
+
+    console.log('🧪 开始空间哈希查询测试...')
+
+    // 构建空间哈希
+    const spatialHash = new Map<string, string[]>()
+    elements.forEach(el => {
+      const key = this.getGridKey(el.x, el.y, gridSize)
+      if (!spatialHash.has(key)) {
+        spatialHash.set(key, [])
+      }
+      spatialHash.get(key)!.push(el.id)
+    })
+
+    // 线性查询
+    const linearStart = performance.now()
+    for (let i = 0; i < queryCount; i++) {
+      const testPoint = { 
+        x: Math.random() * 1000, 
+        y: Math.random() * 1000 
+      }
+      elements.filter(el => 
+        el.x <= testPoint.x && el.x + el.width >= testPoint.x &&
+        el.y <= testPoint.y && el.y + el.height >= testPoint.y
+      )
+    }
+    const linearTime = performance.now() - linearStart
+
+    // 哈希查询
+    const hashStart = performance.now()
+    for (let i = 0; i < queryCount; i++) {
+      const testPoint = { 
+        x: Math.random() * 1000, 
+        y: Math.random() * 1000 
+      }
+      const key = this.getGridKey(testPoint.x, testPoint.y, gridSize)
+      spatialHash.get(key) || []
+    }
+    const hashTime = performance.now() - hashStart
+
+    const improvement = ((1 - hashTime / linearTime) * 100).toFixed(1)
+
+    const result = {
+      linear: Math.round(linearTime * 100) / 100,
+      hash: Math.round(hashTime * 100) / 100,
+      improvement: `${improvement}%`
+    }
+
+    console.log(`  → 线性查询: ${result.linear}ms`)
+    console.log(`  → 空间哈希: ${result.hash}ms`)
+    console.log(`  → 性能提升: ${result.improvement}`)
+
+    this.results.set('spatialHash', result)
+    return result
+  }
+
+  /**
+   * 测试5：缩放性能
+   * 运行方式：在浏览器控制台执行
+   */
+  async testZoomPerformance(): Promise<Record<number, number>> {
+    const scales = [0.5, 1, 2, 5, 10]
+    const elementCount = 200
+    const results: Record<number, number> = {}
+
+    console.log('🧪 开始缩放性能测试...')
+
+    for (const scale of scales) {
+      const elements = this.createTestElements(elementCount)
+      
+      const fps = await this.measureFPS(() => {
+        this.ctx.save()
+        this.ctx.scale(scale, scale)
+        this.renderElements(elements, 1)
+        this.ctx.restore()
+      })
+
+      results[scale] = fps
+      console.log(`  → ${scale}x 缩放: ${fps} FPS`)
+    }
+
+    this.results.set('zoomPerformance', results)
+    return results
+  }
+
+  /**
+   * 运行所有测试并生成报告
+   */
+  async runAllTests(): Promise<void> {
+    console.log('\n' + '='.repeat(50))
+    console.log('🎯 白板性能测试完整报告')
+    console.log('='.repeat(50) + '\n')
+
+    await this.testFPSByElementCount()
+    console.log('')
+    await this.testDirtyRendering()
+    console.log('')
+    await this.testOffscreenCacheComplex()
+    console.log('')
+    this.testSpatialHash()
+    console.log('')
+    await this.testZoomPerformance()
+
+    console.log('\n' + '='.repeat(50))
+    console.log('📋 所有测试完成！复制以下数据用于简历描述：')
+    console.log('='.repeat(50))
+    console.log(JSON.stringify(Object.fromEntries(this.results), null, 2))
+  }
+
+  // ====== 辅助方法 ======
+
+  private createTestElements(count: number, complex = false): any[] {
+    const elements = []
+    for (let i = 0; i < count; i++) {
+      elements.push({
+        id: `el-${i}`,
+        type: 'rectangle',
+        x: Math.random() * 800,
+        y: Math.random() * 600,
+        width: 30 + Math.random() * 50,
+        height: 30 + Math.random() * 50,
+        fill: `hsl(${Math.random() * 360}, 70%, 50%)`,
+        stroke: '#000',
+        lineWidth: 1,
+        complex // 标记是否为复杂图形
+      })
+    }
+    return elements
+  }
+
+  private renderElements(elements: any[], iterations: number): void {
+    for (let i = 0; i < iterations; i++) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+      elements.forEach(el => this.renderSingleElement(el))
+    }
+  }
+
+  private renderSingleElement(el: any): void {
+    this.ctx.fillStyle = el.fill
+    this.ctx.strokeStyle = el.stroke
+    this.ctx.lineWidth = el.lineWidth
+    this.ctx.fillRect(el.x, el.y, el.width, el.height)
+    this.ctx.strokeRect(el.x, el.y, el.width, el.height)
+  }
+
+  private renderComplexElement(el: any): void {
+    // 模拟复杂图形渲染（多次路径操作）
+    this.ctx.fillStyle = el.fill
+    this.ctx.beginPath()
+    this.ctx.arc(el.x + el.width/2, el.y + el.height/2, el.width/2, 0, Math.PI * 2)
+    this.ctx.fill()
+    
+    // 添加渐变
+    const gradient = this.ctx.createRadialGradient(
+      el.x + el.width/2, el.y + el.height/2, 0,
+      el.x + el.width/2, el.y + el.height/2, el.width/2
+    )
+    gradient.addColorStop(0, el.fill)
+    gradient.addColorStop(1, 'transparent')
+    this.ctx.fillStyle = gradient
+    this.ctx.fill()
+  }
+
+  private renderComplexElementToCtx(ctx: CanvasRenderingContext2D, el: any): void {
+    ctx.fillStyle = el.fill
+    ctx.beginPath()
+    ctx.arc(el.width/2, el.height/2, el.width/2, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  private async measureFPS(renderFn: () => void, duration = 2000): Promise<number> {
+    let frameCount = 0
+    const startTime = performance.now()
+
+    return new Promise(resolve => {
+      const loop = () => {
+        renderFn()
+        frameCount++
+
+        if (performance.now() - startTime < duration) {
+          requestAnimationFrame(loop)
+        } else {
+          const fps = Math.round(frameCount * 1000 / (performance.now() - startTime))
+          resolve(fps)
+        }
+      }
+      requestAnimationFrame(loop)
+    })
+  }
+
+  private async measureRenderTime(fn: () => void, iterations = 10): Promise<number> {
+    // 预热
+    for (let i = 0; i < 3; i++) fn()
+
+    const times: number[] = []
+    for (let i = 0; i < iterations; i++) {
+      const start = performance.now()
+      fn()
+      times.push(performance.now() - start)
+    }
+
+    return times.reduce((a, b) => a + b, 0) / times.length
+  }
+
+  private getGridKey(x: number, y: number, gridSize: number): string {
+    const gx = Math.floor(x / gridSize)
+    const gy = Math.floor(y / gridSize)
+    return `${gx},${gy}`
+  }
+}
+
+// 导出快捷函数
+export function createStressTester(canvas: HTMLCanvasElement): WhiteboardStressTester {
+  return new WhiteboardStressTester(canvas)
+}

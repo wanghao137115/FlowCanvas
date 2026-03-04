@@ -1,0 +1,100 @@
+# GitHub Actions 工作流 - 构建并部署到阿里云 OSS
+
+name: 构建部署
+
+# 触发条件：推送到 main 分支
+on:
+  push:
+    branches: [main]
+  # 手动触发
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # 2. 设置 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          # 启用 npm 缓存
+          cache: 'npm'
+      
+      # 3. 安装依赖
+      - name: Install dependencies
+        run: npm ci
+      
+      # 4. 类型检查
+      - name: Type check
+        run: npm run type-check
+        continue-on-error: true
+      
+      # 5. 构建生产版本
+      - name: Build
+        run: npm run build
+      
+      # 6. 上传 SourceMap 到阿里云 ARMS
+      - name: Upload SourceMap
+        run: node scripts/upload-sourcemap.cjs
+        env:
+          ACCESS_KEY_ID: ${{ secrets.ACCESS_KEY_ID }}
+          ACCESS_KEY_SECRET: ${{ secrets.ACCESS_KEY_SECRET }}
+        continue-on-error: true
+      
+      # 7. 上传构建产物作为 artifact
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. 下载构建产物
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      
+      # 2. 安装阿里云 OSS 工具
+      - name: Install ossutil
+        run: |
+          wget https://github.com/aliyun/ossutil/releases/download/v1.7.14/ossutil-linux64 -O ossutil
+          chmod +x ossutil
+      
+      # 3. 配置 ossutil
+      - name: Configure ossutil
+        run: |
+          echo "[Credentials]" > ossutilconfig
+          echo "language=EN" >> ossutilconfig
+          echo "endpoint=oss-cn-beijing.aliyuncs.com" >> ossutilconfig
+          echo "accessKeyID=${{ secrets.ACCESS_KEY_ID }}" >> ossutilconfig
+          echo "accessKeySecret=${{ secrets.ACCESS_KEY_SECRET }}" >> ossutilconfig
+      
+      # 4. 部署到 OSS (公共读权限的 bucket)
+      - name: Deploy to OSS
+        run: |
+          # 设置文件为公共读
+          ./ossutil cp -r dist/ oss://baibaiyingyong/ \
+            --config-file ossutilconfig \
+            --meta "x-oss-storage-class:Standard" \
+            --jobs 10 \
+            --update \
+            --force
+            
+      # 5. 打印部署结果
+      - name: Show deployment URL
+        run: |
+          echo "✅ 部署完成！"
+          echo "🌐 访问地址: https://baibaiyingyong.oss-cn-beijing.aliyuncs.com/index.html"
