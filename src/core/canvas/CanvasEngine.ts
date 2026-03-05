@@ -64,6 +64,9 @@ export class CanvasEngine {
   private selectedElementIds: string[] = []
   private isInitialized: boolean = false
   private isPanning: boolean = false
+  private isDraggingCanvas: boolean = false  // 是否在拖动画布（用于性能优化）
+  private dragStartOffset: Vector2 = { x: 0, y: 0 }  // 拖动开始时的视口偏移
+  private offscreenCanvas: HTMLCanvasElement | null = null  // 离屏 Canvas 用于拖动优化
   public isInternalUpdate: boolean = false
   private animationFrameId: number | null = null
   private rotationStartAngle: number | null = null
@@ -1200,6 +1203,11 @@ export class CanvasEngine {
       // 检查是否应该开始拖拽画布（按住空格键、中键或Ctrl键）
       if (event.button === 1 || event.altKey || event.ctrlKey) { // 中键、Alt键或Ctrl键
         this.isPanning = true
+        this.isDraggingCanvas = true  // 标记开始拖动画布
+        // 保存拖动开始时的视口偏移
+        this.dragStartOffset = { ...this.viewportManager.getViewport().offset }
+        // 保存当前画面到离屏 Canvas
+        this.saveToOffscreenCanvas()
         this.viewportManager.startPan(position)
         this.canvas.style.cursor = 'grabbing'
         return
@@ -1360,7 +1368,8 @@ export class CanvasEngine {
       }
       // 平移时使视口缓存失效
       this.invalidateViewportCache()
-      this.requestRender()
+      // 使用离屏 Canvas 快速复制（GPU 加速）
+      this.quickPan()
       return
     }
 
@@ -1463,9 +1472,13 @@ export class CanvasEngine {
     // 如果正在拖拽画布，结束拖拽
     if (this.isPanning) {
       this.isPanning = false
+      this.isDraggingCanvas = false
       this.viewportManager.endPan()
       this.canvas.style.cursor = 'default'
-      this.requestRender()
+      // 释放离屏 Canvas 并重新渲染
+      this.releaseOffscreenCanvas()
+      this.invalidateViewportCache()
+      this.render()
       return
     }
       
@@ -1558,17 +1571,29 @@ export class CanvasEngine {
     // 将屏幕坐标转换为虚拟坐标，作为缩放中心点
     const virtualCenterPoint = this.viewportManager.getCoordinateTransformer().screenToVirtual(position)
     
-    // 打印调试信息
-    console.log('[缩放中心] 鼠标屏幕位置:', { x: position.x.toFixed(2), y: position.y.toFixed(2) })
-    console.log('[缩放中心] 对应虚拟位置:', { x: virtualCenterPoint.x.toFixed(2), y: virtualCenterPoint.y.toFixed(2) })
-    console.log('[缩放中心] 当前scale:', this.viewportManager.getViewport().scale.toFixed(4))
-    
     this.viewportManager.zoom(zoomFactor, virtualCenterPoint)
     
     // 缩放后使视口缓存失效
     this.invalidateViewportCache()
     
-    this.requestRender()
+    // 缩放时使用节流渲染，避免每帧重绘
+    // 使用 requestAnimationFrame 但不加到渲染队列，而是直接渲染
+    this.throttledRender()
+  }
+
+  /**
+   * 节流渲染：用于缩放等高频操作
+   */
+  private lastThrottledRenderTime: number = 0
+  private throttledRenderThrottle: number = 16  // 约 60fps
+  
+  private throttledRender(): void {
+    const now = performance.now()
+    if (now - this.lastThrottledRenderTime < this.throttledRenderThrottle) {
+      return
+    }
+    this.lastThrottledRenderTime = now
+    this.render()
   }
 
   /**
@@ -3826,6 +3851,58 @@ export class CanvasEngine {
   private invalidateViewportCache(): void {
     this.viewportBoundsCacheValid = false
     this.markDirty()
+  }
+
+  /**
+   * 保存当前画面到离屏 Canvas（用于拖动优化）
+   */
+  private saveToOffscreenCanvas(): void {
+    if (!this.offscreenCanvas) {
+      this.offscreenCanvas = document.createElement('canvas')
+    }
+    this.offscreenCanvas.width = this.canvas.width
+    this.offscreenCanvas.height = this.canvas.height
+    
+    const ctx = this.offscreenCanvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(this.canvas, 0, 0)
+    }
+  }
+
+  /**
+   * 快速平移：使用离屏 Canvas 复制实现 GPU 加速拖动
+   */
+  private quickPan(): void {
+    const ctx = this.canvas.getContext('2d')
+    if (!ctx || !this.offscreenCanvas) return
+
+    const viewport = this.viewportManager.getViewport()
+    
+    // 计算拖动位移（像素）
+    const deltaX = (viewport.offset.x - this.dragStartOffset.x) * viewport.scale
+    const deltaY = (viewport.offset.y - this.dragStartOffset.y) * viewport.scale
+    
+    // 清除画布
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+    
+    // 使用 drawImage 复制离屏 Canvas 内容到新位置
+    // 负的 deltaX 表示向右拖动时，内容应该向左移动
+    ctx.drawImage(
+      this.offscreenCanvas,
+      -deltaX, -deltaY,
+      this.canvas.width, this.canvas.height
+    )
+  }
+
+  /**
+   * 释放离屏 Canvas
+   */
+  private releaseOffscreenCanvas(): void {
+    if (this.offscreenCanvas) {
+      this.offscreenCanvas.width = 0
+      this.offscreenCanvas.height = 0
+      this.offscreenCanvas = null
+    }
   }
 
   /**

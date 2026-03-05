@@ -17,6 +17,8 @@ import {
 ;(window as any).whiteboardPerfMonitor = whiteboardPerfMonitor
 ;(window as any).WhiteboardStressTester = WhiteboardStressTester
 
+
+
 // ============ 错误监控系统 (基于 ARMS) ============
 import { LogLevel } from './core/monitor'
 
