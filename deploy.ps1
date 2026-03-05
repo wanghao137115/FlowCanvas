@@ -1,10 +1,18 @@
 # Aliyun OSS Deploy Script
-$env:OSS_ACCESS_KEY_ID = "LTAI5tAzj1wDA7w55H4mdkd6"
-$env:OSS_ACCESS_KEY_SECRET = "ZEt30HlhOCpZqaJ0VUyw5ZEBF8SXeE"
+# 密钥从环境变量获取，CI/CD 时由 GitHub Secrets 传入
+$env:OSS_ACCESS_KEY_ID = if ($env:OSS_ACCESS_KEY_ID) { $env:OSS_ACCESS_KEY_ID } else { "" }
+$env:OSS_ACCESS_KEY_SECRET = if ($env:OSS_ACCESS_KEY_SECRET) { $env:OSS_ACCESS_KEY_SECRET } else { "" }
 $OSS_BUCKET = "baibaiyingyong"
 $OSS_REGION = "oss-cn-beijing"
 
 Write-Host "Starting deploy to Aliyun OSS..." -ForegroundColor Green
+
+# Check if credentials are provided
+if (-not $env:OSS_ACCESS_KEY_ID -or -not $env:OSS_ACCESS_KEY_SECRET) {
+    Write-Host "Warning: OSS credentials not provided. Skipping upload." -ForegroundColor Yellow
+    Write-Host "Set OSS_ACCESS_KEY_ID and OSS_ACCESS_KEY_SECRET environment variables to deploy." -ForegroundColor Yellow
+    exit 0
+}
 
 # Check dist folder
 if (-not (Test-Path "dist")) {

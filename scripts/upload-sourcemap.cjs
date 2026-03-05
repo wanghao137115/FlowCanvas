@@ -12,9 +12,9 @@ const crypto = require('crypto');
 
 // ============ 配置项 ============
 const config = {
-  // 阿里云 ARMS 配置
-  accessKeyId: 'LTAI5tAzj1wDA7w55H4mdkd6',
-  accessKeySecret: 'ZEt30HlhOCpZqaJ0VUyw5ZEBF8SXeE',
+  // 阿里云 ARMS 配置（从环境变量获取，CI/CD 时由 GitHub Secrets 传入）
+  accessKeyId: process.env.ACCESS_KEY_ID || '',
+  accessKeySecret: process.env.ACCESS_KEY_SECRET || '',
   appId: 'c1fpi8vd1o@e35195e637db246',
   region: 'cn-hangzhou',
   
