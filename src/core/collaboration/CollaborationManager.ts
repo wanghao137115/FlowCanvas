@@ -166,8 +166,57 @@ export class CollaborationManager {
   private broadcastMessage(message: CollaborationMessage): void {
     if (this.channel && this.isConnected) {
       console.log('[Collab] 广播消息:', message.type, message.userId)
-      this.channel.postMessage(message)
+      try {
+        // 尝试克隆消息，确保可以被序列化
+        const serializableMessage = this.makeSerializable(message)
+        this.channel.postMessage(serializableMessage)
+      } catch (error) {
+        console.error('[Collab] 广播消息失败:', error)
+        // 静默处理序列化错误，避免阻塞正常功能
+      }
     }
+  }
+
+  /**
+   * 确保消息可以被序列化（用于 BroadcastChannel）
+   * 移除不可序列化的属性，如 HTMLImageElement、Blob 等
+   */
+  private makeSerializable(obj: any): any {
+    if (obj === null || obj === undefined) {
+      return obj
+    }
+
+    // 如果是数组，递归处理每个元素
+    if (Array.isArray(obj)) {
+      return obj.map(item => this.makeSerializable(item))
+    }
+
+    // 如果是对象，递归处理每个属性
+    if (typeof obj === 'object') {
+      const result: any = {}
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          const value = obj[key]
+          
+          // 跳过不可序列化的类型
+          if (value instanceof HTMLImageElement || 
+              value instanceof Blob || 
+              value instanceof File ||
+              value instanceof HTMLCanvasElement ||
+              value instanceof OffscreenCanvas) {
+            console.log(`[Collab] 跳过不可序列化的属性: ${key}`)
+            continue
+          }
+          
+          // 递归处理
+          result[key] = this.makeSerializable(value)
+        }
+      }
+      return result
+    }
+
+    // 基本类型直接返回
+    return obj
   }
 
   /**

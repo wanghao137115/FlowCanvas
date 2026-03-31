@@ -21,6 +21,7 @@ import { TemplateManager } from '../template/TemplateManager'
 import { Vector2Utils } from '../../utils/math/Vector2'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { ExportManager } from '../export/ExportManager'
+import { ImageElement } from '../elements/ImageElement'
 
 /**
  * 画布引擎
@@ -695,12 +696,45 @@ export class CanvasEngine {
         // 设置命令撤销回调
         this.canvasStore.historyManager.setOnCommandUndo((command: any) => {
           this.operationExecutor.undoCommand(command)
+          
+          // 修复：撤销后同步更新 CanvasEngine 的选中状态
+          // 这确保了如果撤销操作删除了一个选中的元素，其选中状态也会被清除
+          this.selectedElementIds = [...this.operationExecutor.getSelectedElements()]
+          
+          // 同步更新选择工具
+          const selectTool = this.toolManager.getTool(ToolType.SELECT) as any
+          if (selectTool) {
+            const selectedElements = this.elements.filter(el => this.selectedElementIds.includes(el.id))
+            selectTool.setSelectedElements(selectedElements)
+          }
+          
+          // 通知外部选择变化
+          if (this.onSelectionChange) {
+            this.onSelectionChange(this.elements.filter(el => this.selectedElementIds.includes(el.id)))
+          }
+          
           this.render()
         })
 
         // 设置命令重做回调
         this.canvasStore.historyManager.setOnCommandRedo((command: any) => {
           this.operationExecutor.redoCommand(command)
+          
+          // 修复：重做后同步更新 CanvasEngine 的选中状态
+          this.selectedElementIds = [...this.operationExecutor.getSelectedElements()]
+          
+          // 同步更新选择工具
+          const selectTool = this.toolManager.getTool(ToolType.SELECT) as any
+          if (selectTool) {
+            const selectedElements = this.elements.filter(el => this.selectedElementIds.includes(el.id))
+            selectTool.setSelectedElements(selectedElements)
+          }
+          
+          // 通知外部选择变化
+          if (this.onSelectionChange) {
+            this.onSelectionChange(this.elements.filter(el => this.selectedElementIds.includes(el.id)))
+          }
+          
           this.render()
         })
 
@@ -2545,6 +2579,14 @@ export class CanvasEngine {
    * 添加元素
    */
   addElement(element: CanvasElement): void {
+    // 如果是 JSON 数据（没有类方法），转换为对应的类实例
+    let processedElement = element
+    if (element.type === ElementType.IMAGE && !('loadImage' in element)) {
+      // JSON 数据转换为 ImageElement 类实例
+      processedElement = ImageElement.fromJSON(element)
+    }
+    element = processedElement
+
     // 检查是否已存在相同ID的元素
     if (this.elements.some(el => el.id === element.id)) {
       return

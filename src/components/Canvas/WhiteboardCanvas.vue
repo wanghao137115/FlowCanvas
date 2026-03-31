@@ -725,8 +725,9 @@ onMounted(async () => {
       // 自动选择新创建的元素并显示浮动工具栏
       selectElement(element)
       
-      // 广播元素创建操作
-      broadcastOperation('add-element', element, element.id)
+      // 广播元素创建操作 - 使用 toJSON() 序列化元素
+      const serializedElement = element.toJSON ? element.toJSON() : element
+      broadcastOperation('add-element', serializedElement, element.id)
     })
 
     // 设置元素更新回调 - 实时广播元素移动/更新

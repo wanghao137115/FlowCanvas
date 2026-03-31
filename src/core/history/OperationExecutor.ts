@@ -234,7 +234,20 @@ export class CanvasOperationExecutor implements OperationExecutor {
     
     // 恢复选择状态
     if (state.selectedElementIds) {
-      this.selectedElementIds = [...state.selectedElementIds]
+      // 修复：只保留仍然存在于元素列表中的选中ID
+      // 这可以防止撤销删除操作后，选中一个已被删除的元素的残留状态
+      const validSelectedIds = state.selectedElementIds.filter((id: string) => 
+        this.elements.some(el => el.id === id)
+      )
+      this.selectedElementIds = validSelectedIds
+      
+      console.log('🔄 恢复选择状态', { 
+        originalCount: state.selectedElementIds.length,
+        validCount: validSelectedIds.length,
+        validIds: validSelectedIds,
+        removedIds: state.selectedElementIds.filter((id: string) => !validSelectedIds.includes(id))
+      })
+      
       if (this.onSelectionChange) {
         this.onSelectionChange(this.selectedElementIds)
       }
