@@ -1,5 +1,22 @@
 <template>
-  <div class="collaboration-panel" v-if="isEnabled && isConnected">
+  <div 
+    class="collaboration-panel" 
+    v-if="isEnabled && isConnected"
+    :style="panelStyle"
+    @mousedown="startDrag"
+  >
+    <!-- 拖动手柄 -->
+    <div class="panel-drag-handle">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <circle cx="4" cy="4" r="1.5"/>
+        <circle cx="4" cy="8" r="1.5"/>
+        <circle cx="4" cy="12" r="1.5"/>
+        <circle cx="10" cy="4" r="1.5"/>
+        <circle cx="10" cy="8" r="1.5"/>
+        <circle cx="10" cy="12" r="1.5"/>
+      </svg>
+    </div>
+    
     <!-- 协作状态指示 -->
     <div class="collab-status" :class="{ connected: isConnected }">
       <span class="status-dot"></span>
@@ -58,6 +75,55 @@ const isConnected = ref(false)
 const users = ref<CollaborationUser[]>([])
 const cursors = ref<CursorState[]>([])
 
+// 拖动相关状态
+const isDragging = ref(false)
+const dragOffset = ref({ x: 0, y: 0 })
+const panelPosition = ref({ x: 12, y: 12 })
+
+// 面板样式
+const panelStyle = computed(() => ({
+  right: `${panelPosition.value.x}px`,
+  top: `${panelPosition.value.y}px`
+}))
+
+// 开始拖动
+function startDrag(event: MouseEvent) {
+  // 只允许在手柄区域拖动
+  const target = event.target as HTMLElement
+  if (!target.closest('.panel-drag-handle')) {
+    return
+  }
+  
+  isDragging.value = true
+  // 记录鼠标相对于面板右上角的偏移
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  dragOffset.value = {
+    x: window.innerWidth - event.clientX - panelPosition.value.x,
+    y: event.clientY - panelPosition.value.y
+  }
+  
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
+
+// 拖动中
+function onDrag(event: MouseEvent) {
+  if (!isDragging.value) return
+  
+  // 反转 X 方向计算（因为使用的是 right 定位）
+  panelPosition.value = {
+    x: window.innerWidth - event.clientX - dragOffset.value.x,
+    y: event.clientY - dragOffset.value.y
+  }
+}
+
+// 停止拖动
+function stopDrag() {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+}
+
 // 初始化
 onMounted(() => {
   // 连接协作
@@ -109,13 +175,33 @@ defineExpose({
 <style scoped>
 .collaboration-panel {
   position: absolute;
-  top: 12px;
-  right: 12px;
   z-index: 100;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
+  cursor: default;
+}
+
+.panel-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 20px;
+  color: #999;
+  cursor: grab;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.panel-drag-handle:hover {
+  background: rgba(0, 0, 0, 0.1);
+  color: #666;
+}
+
+.panel-drag-handle:active {
+  cursor: grabbing;
 }
 
 .collab-status {

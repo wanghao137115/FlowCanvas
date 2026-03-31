@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "build": "vite build",
+    "build:check": "vue-tsc && vite build",
     "preview": "vite preview",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc --noEmit",
+    "upload-sourcemap": "node scripts/upload-sourcemap.cjs",
+    "deploy": "npm run build && node scripts/upload-sourcemap.cjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -16,11 +19,14 @@
     "cropperjs": "^2.0.1",
     "element-plus": "^2.4.4",
     "pinia": "^2.1.7",
+    "rrweb": "^2.0.0-alpha.4",
+    "uuid": "^13.0.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {
     "@types/cropperjs": "^1.1.5",
     "@types/node": "^20.10.6",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-vue": "^4.5.2",
     "typescript": "^5.3.3",
     "vite": "^5.0.10",

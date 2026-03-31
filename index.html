@@ -5,6 +5,58 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>白板应用</title>
+    <!-- 阿里云 ARMS 前端监控 (RUM SDK) -->
+    <script>
+    (function(window, document) {
+      window.__rum = window.__rum || {};
+      
+      // 根据当前域名判断环境
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      
+      if (isLocal) {
+        // 本地开发环境配置
+        window.__rum.endpoint = 'https://proj-xtrace-e19d2853414f08baf582918befa2e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com/rum/web/v2?workspace=default-cms-1222771575239628-cn-hangzhou&service_id=c1fpi8vd1o@e35195e637db246';
+      } else {
+        // 生产环境配置
+        window.__rum.endpoint = 'https://proj-xtrace-e19d2853414f08baf582918befa2e-cn-hangzhou.cn-hangzhou.log.aliyuncs.com/rum/web/v2?workspace=default-cms-1222771575239628-cn-hangzhou&service_id=c1fpi8vd1o@e35195e637db246';
+      }
+      
+      window.__rum.env = isLocal ? 'dev' : 'prod';
+      window.__rum.spaMode = 'history';
+      window.__rum.collectors = {
+        perf: true,
+        webVitals: true,
+        api: true,
+        staticResource: true,
+        jsError: true,
+        consoleError: true,
+        action: true,        // 用户行为录制
+        session: true,      // 会话追踪
+        resource: true,      // 资源加载
+      };
+      window.__rum.tracing = false;
+      
+      // 开启详细日志
+      window.__rum.debug = isLocal;
+
+      // 动态加载 SDK 脚本
+      var script = document.createElement('script');
+      script.crossOrigin = 'anonymous';
+      script.src = 'https://sdk.rum.aliyuncs.com/v2/browser-sdk.js';
+      script.onload = function() {
+        console.log('[ARMS] 前端监控已加载 (env: ' + window.__rum.env + ')');
+        
+        // 检查 rrweb 是否可用
+        if (window.__rum && window.__rum.rrweb) {
+          console.log('[ARMS] 行为录制已启用');
+        }
+      };
+      script.onerror = function() {
+        console.error('[ARMS] 前端监控加载失败');
+      };
+      document.head.appendChild(script);
+    })(window, document);
+    </script>
   </head>
   <body>
     <div id="app"></div>

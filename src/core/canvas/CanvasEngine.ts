@@ -64,6 +64,9 @@ export class CanvasEngine {
   private selectedElementIds: string[] = []
   private isInitialized: boolean = false
   private isPanning: boolean = false
+  private isDraggingCanvas: boolean = false  // 是否在拖动画布（用于性能优化）
+  private dragStartOffset: Vector2 = { x: 0, y: 0 }  // 拖动开始时的视口偏移
+  private offscreenCanvas: HTMLCanvasElement | null = null  // 离屏 Canvas 用于拖动优化
   public isInternalUpdate: boolean = false
   private animationFrameId: number | null = null
   private rotationStartAngle: number | null = null
@@ -1200,6 +1203,11 @@ export class CanvasEngine {
       // 检查是否应该开始拖拽画布（按住空格键、中键或Ctrl键）
       if (event.button === 1 || event.altKey || event.ctrlKey) { // 中键、Alt键或Ctrl键
         this.isPanning = true
+        this.isDraggingCanvas = true  // 标记开始拖动画布
+        // 保存拖动开始时的视口偏移
+        this.dragStartOffset = { ...this.viewportManager.getViewport().offset }
+        // 保存当前画面到离屏 Canvas
+        this.saveToOffscreenCanvas()
         this.viewportManager.startPan(position)
         this.canvas.style.cursor = 'grabbing'
         return
@@ -1360,7 +1368,8 @@ export class CanvasEngine {
       }
       // 平移时使视口缓存失效
       this.invalidateViewportCache()
-      this.requestRender()
+      // 使用离屏 Canvas 快速复制（GPU 加速）
+      this.quickPan()
       return
     }
 
@@ -1463,9 +1472,13 @@ export class CanvasEngine {
     // 如果正在拖拽画布，结束拖拽
     if (this.isPanning) {
       this.isPanning = false
+      this.isDraggingCanvas = false
       this.viewportManager.endPan()
       this.canvas.style.cursor = 'default'
-      this.requestRender()
+      // 释放离屏 Canvas 并重新渲染
+      this.releaseOffscreenCanvas()
+      this.invalidateViewportCache()
+      this.render()
       return
     }
       
@@ -1528,19 +1541,59 @@ export class CanvasEngine {
   private handleWheel(event: WheelEvent): void {
     event.preventDefault()
 
+    // 滚动时隐藏浮动工具栏
+    if (this.onFloatingToolbarVisibilityChange) {
+      this.onFloatingToolbarVisibilityChange(false)
+    }
+
     const rect = this.canvas.getBoundingClientRect()
     const position: Vector2 = {
       x: event.clientX - rect.left,
       y: event.clientY - rect.top
     }
 
-    const delta = event.deltaY > 0 ? 0.95 : 1.05
-    this.viewportManager.zoom(delta, position)
+    // 计算缩放系数：根据 deltaY 的数值来调整缩放速度
+    // 不同的鼠标和操作系统 deltaY 值差异很大，需要归一化处理
+    const deltaY = event.deltaY
+    let zoomFactor: number
+    
+    if (Math.abs(deltaY) < 10) {
+      // 小幅度滚动（精确鼠标/触控板）
+      zoomFactor = deltaY > 0 ? 0.95 : 1.05
+    } else if (Math.abs(deltaY) < 50) {
+      // 中等幅度滚动
+      zoomFactor = deltaY > 0 ? 0.90 : 1.10
+    } else {
+      // 大幅度滚动（普通鼠标）- 使用更大的缩放幅度
+      zoomFactor = deltaY > 0 ? 0.80 : 1.25
+    }
+
+    // 将屏幕坐标转换为虚拟坐标，作为缩放中心点
+    const virtualCenterPoint = this.viewportManager.getCoordinateTransformer().screenToVirtual(position)
+    
+    this.viewportManager.zoom(zoomFactor, virtualCenterPoint)
     
     // 缩放后使视口缓存失效
     this.invalidateViewportCache()
     
-    this.requestRender()
+    // 缩放时使用节流渲染，避免每帧重绘
+    // 使用 requestAnimationFrame 但不加到渲染队列，而是直接渲染
+    this.throttledRender()
+  }
+
+  /**
+   * 节流渲染：用于缩放等高频操作
+   */
+  private lastThrottledRenderTime: number = 0
+  private throttledRenderThrottle: number = 16  // 约 60fps
+  
+  private throttledRender(): void {
+    const now = performance.now()
+    if (now - this.lastThrottledRenderTime < this.throttledRenderThrottle) {
+      return
+    }
+    this.lastThrottledRenderTime = now
+    this.render()
   }
 
   /**
@@ -1702,14 +1755,9 @@ export class CanvasEngine {
     ctx.fillStyle = this.settings.backgroundColor
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height)
 
-    // 渲染网格（在视口变换之前，确保网格在标尺下方）
+    // 渲染网格（在视口变换之前）
     if (this.settings.gridVisible) {
       this.renderer.renderGrid()
-    }
-
-    // 渲染标尺（在视口变换之前，确保标尺位置固定，在网格之上）
-    if (this.settings.rulersVisible) {
-      this.renderer.renderRulers()
     }
 
     // 应用视口变换
@@ -1717,6 +1765,14 @@ export class CanvasEngine {
 
     // 按图层顺序渲染元素
     this.renderElementsByLayer()
+
+    // 恢复视口变换（让标尺使用屏幕坐标）
+    this.viewportManager.restoreTransform(ctx)
+
+    // 渲染标尺（在元素之后，确保元素在标尺之上）
+    if (this.settings.rulersVisible) {
+      this.renderer.renderRulers()
+    }
 
     // 更新箭头工具的元素列表（用于吸附功能）
     const arrowTool = this.toolManager.getTool(ToolType.ARROW)
@@ -1739,14 +1795,19 @@ export class CanvasEngine {
     // 渲染工具预览（使用屏幕坐标，确保在最顶层）
     this.toolManager.render(ctx)
     
-    // 渲染选中元素高亮和其他覆盖层
-    this.renderer.renderOverlay(this.isInternalUpdate)
+    // 缩放时不渲染覆盖层UI（选框、手柄、连接点），提升性能
+    const isZooming = this.viewportManager.getIsZooming()
     
-    // 渲染变换手柄
-    this.renderTransformHandles(ctx)
-    
-    // 渲染连接点（在最后渲染，确保在最上层）
-    this.renderer.renderConnectionPoints()
+    if (!isZooming) {
+      // 渲染选中元素高亮和其他覆盖层
+      this.renderer.renderOverlay(this.isInternalUpdate)
+      
+      // 渲染变换手柄
+      this.renderTransformHandles(ctx)
+      
+      // 渲染连接点（在最后渲染，确保在最上层）
+      this.renderer.renderConnectionPoints()
+    }
     
     // 渲染连接线（拖拽时）
     this.renderer.renderConnectionLine()
@@ -3790,6 +3851,58 @@ export class CanvasEngine {
   private invalidateViewportCache(): void {
     this.viewportBoundsCacheValid = false
     this.markDirty()
+  }
+
+  /**
+   * 保存当前画面到离屏 Canvas（用于拖动优化）
+   */
+  private saveToOffscreenCanvas(): void {
+    if (!this.offscreenCanvas) {
+      this.offscreenCanvas = document.createElement('canvas')
+    }
+    this.offscreenCanvas.width = this.canvas.width
+    this.offscreenCanvas.height = this.canvas.height
+    
+    const ctx = this.offscreenCanvas.getContext('2d')
+    if (ctx) {
+      ctx.drawImage(this.canvas, 0, 0)
+    }
+  }
+
+  /**
+   * 快速平移：使用离屏 Canvas 复制实现 GPU 加速拖动
+   */
+  private quickPan(): void {
+    const ctx = this.canvas.getContext('2d')
+    if (!ctx || !this.offscreenCanvas) return
+
+    const viewport = this.viewportManager.getViewport()
+    
+    // 计算拖动位移（像素）
+    const deltaX = (viewport.offset.x - this.dragStartOffset.x) * viewport.scale
+    const deltaY = (viewport.offset.y - this.dragStartOffset.y) * viewport.scale
+    
+    // 清除画布
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+    
+    // 使用 drawImage 复制离屏 Canvas 内容到新位置
+    // 负的 deltaX 表示向右拖动时，内容应该向左移动
+    ctx.drawImage(
+      this.offscreenCanvas,
+      -deltaX, -deltaY,
+      this.canvas.width, this.canvas.height
+    )
+  }
+
+  /**
+   * 释放离屏 Canvas
+   */
+  private releaseOffscreenCanvas(): void {
+    if (this.offscreenCanvas) {
+      this.offscreenCanvas.width = 0
+      this.offscreenCanvas.height = 0
+      this.offscreenCanvas = null
+    }
   }
 
   /**

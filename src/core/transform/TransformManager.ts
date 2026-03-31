@@ -40,6 +40,26 @@ export class TransformManager {
   }
 
   /**
+   * 虚拟坐标转屏幕坐标
+   */
+  private virtualToScreen(virtualPoint: Vector2): Vector2 {
+    if (this.canvasEngine?.viewportManager) {
+      return this.canvasEngine.viewportManager.getCoordinateTransformer().virtualToScreen(virtualPoint)
+    }
+    return virtualPoint
+  }
+
+  /**
+   * 虚拟边界转屏幕边界
+   */
+  private virtualToScreenBounds(virtualBounds: { x: number; y: number; width: number; height: number }): { x: number; y: number; width: number; height: number } {
+    if (this.canvasEngine?.viewportManager) {
+      return this.canvasEngine.viewportManager.getCoordinateTransformer().virtualToScreenBounds(virtualBounds)
+    }
+    return virtualBounds
+  }
+
+  /**
    * 初始化变换手�?
    */
   private initializeHandles(style?: Partial<TransformHandleStyle>): void {
@@ -340,16 +360,19 @@ export class TransformManager {
     const bounds = this.getSelectedBounds()
     if (!bounds) return
 
+    // 将边界转换为屏幕坐标
+    const screenBounds = this.virtualToScreenBounds(bounds)
+
     ctx.save()
     ctx.strokeStyle = '#007ACC'
     ctx.lineWidth = 1
     ctx.setLineDash([2, 2])
     
     ctx.strokeRect(
-      bounds.x,
-      bounds.y,
-      bounds.width,
-      bounds.height
+      screenBounds.x,
+      screenBounds.y,
+      screenBounds.width,
+      screenBounds.height
     )
     
     ctx.restore()
@@ -408,14 +431,15 @@ export class TransformManager {
 
     const margin = 10 // 手柄距离边界的距离
 
-    // 获取元素中心点
-    const centerX = bounds.x + bounds.width / 2
-    const centerY = bounds.y + bounds.height / 2
+    // 将边界从虚拟坐标转换为屏幕坐标
+    const screenBounds = this.virtualToScreenBounds(bounds)
+    const screenCenterX = screenBounds.x + screenBounds.width / 2
+    const screenCenterY = screenBounds.y + screenBounds.height / 2
 
     // 获取旋转角度（单选时使用第一个元素的旋转角度）
     const rotation = this.selectedElements.length === 1 ? this.selectedElements[0].rotation : 0
 
-    // 计算手柄位置的辅助函数
+    // 计算手柄位置的辅助函数（使用屏幕坐标）
     const rotatePoint = (x: number, y: number, centerX: number, centerY: number, angle: number) => {
       const cos = Math.cos(angle)
       const sin = Math.sin(angle)
@@ -427,17 +451,17 @@ export class TransformManager {
       }
     }
 
-    // 定义手柄的原始位置（相对于边界框）
+    // 定义手柄的原始位置（相对于边界框，使用屏幕坐标）
     const handlePositions = {
-      [TransformHandleType.RESIZE_NW]: { x: bounds.x - margin, y: bounds.y - margin },
-      [TransformHandleType.RESIZE_N]: { x: bounds.x + bounds.width / 2, y: bounds.y - margin },
-      [TransformHandleType.RESIZE_NE]: { x: bounds.x + bounds.width + margin, y: bounds.y - margin },
-      [TransformHandleType.RESIZE_E]: { x: bounds.x + bounds.width + margin, y: bounds.y + bounds.height / 2 },
-      [TransformHandleType.RESIZE_SE]: { x: bounds.x + bounds.width + margin, y: bounds.y + bounds.height + margin },
-      [TransformHandleType.RESIZE_S]: { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height + margin },
-      [TransformHandleType.RESIZE_SW]: { x: bounds.x - margin, y: bounds.y + bounds.height + margin },
-      [TransformHandleType.RESIZE_W]: { x: bounds.x - margin, y: bounds.y + bounds.height / 2 },
-      [TransformHandleType.ROTATE]: { x: bounds.x + bounds.width / 2, y: bounds.y - margin - 20 }
+      [TransformHandleType.RESIZE_NW]: { x: screenBounds.x - margin, y: screenBounds.y - margin },
+      [TransformHandleType.RESIZE_N]: { x: screenBounds.x + screenBounds.width / 2, y: screenBounds.y - margin },
+      [TransformHandleType.RESIZE_NE]: { x: screenBounds.x + screenBounds.width + margin, y: screenBounds.y - margin },
+      [TransformHandleType.RESIZE_E]: { x: screenBounds.x + screenBounds.width + margin, y: screenBounds.y + screenBounds.height / 2 },
+      [TransformHandleType.RESIZE_SE]: { x: screenBounds.x + screenBounds.width + margin, y: screenBounds.y + screenBounds.height + margin },
+      [TransformHandleType.RESIZE_S]: { x: screenBounds.x + screenBounds.width / 2, y: screenBounds.y + screenBounds.height + margin },
+      [TransformHandleType.RESIZE_SW]: { x: screenBounds.x - margin, y: screenBounds.y + screenBounds.height + margin },
+      [TransformHandleType.RESIZE_W]: { x: screenBounds.x - margin, y: screenBounds.y + screenBounds.height / 2 },
+      [TransformHandleType.ROTATE]: { x: screenBounds.x + screenBounds.width / 2, y: screenBounds.y - margin - 20 }
     }
 
     // 应用旋转并设置手柄位置
@@ -449,7 +473,7 @@ export class TransformManager {
           handle.setVisible(false)
         } else {
           // 应用旋转变换（将角度转换为弧度）
-          const rotatedPosition = rotatePoint(position.x, position.y, centerX, centerY, (rotation * Math.PI) / 180)
+          const rotatedPosition = rotatePoint(position.x, position.y, screenCenterX, screenCenterY, (rotation * Math.PI) / 180)
           handle.setPosition(rotatedPosition)
           handle.setVisible(!isTooSmall)
         }

@@ -78,7 +78,13 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
 
   const zoomTo = (scale: number, center?: { x: number; y: number }) => {
-    const newScale = Math.max(0.1, Math.min(5, scale))
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+    let newScale = scale
+    if (newScale < minScale) newScale = minScale
+    if (newScale > maxScale) newScale = maxScale
+
     if (center) {
       const scaleRatio = newScale / viewport.scale
       viewport.offset.x = center.x - (center.x - viewport.offset.x) * scaleRatio

@@ -288,19 +288,25 @@ export class ShapeTool extends BaseTool {
     const width = Math.abs(end.x - start.x)
     const height = Math.abs(end.y - start.y)
 
+    // 获取当前视口信息
+    const viewport = this.canvasEngine.viewportManager.getViewport()
+    const scale = viewport.scale
+    const offset = viewport.offset
+    
+    // 将屏幕坐标转换为虚拟坐标（与 CoordinateTransformer 一致）
+    const virtualX = x / scale + offset.x
+    const virtualY = y / scale + offset.y
+    const virtualWidth = width / scale
+    const virtualHeight = height / scale
 
-    // ✅ 修复：将屏幕坐标转换为虚拟坐标
-    const virtualPosition = this.screenToVirtual({ x, y })
-    const virtualSize = {
-      x: this.screenToVirtual({ x: width, y: 0 }).x,
-      y: this.screenToVirtual({ x: 0, y: height }).y
-    }
+    const virtualPosition = { x: virtualX, y: virtualY }
+    const virtualSize = { x: virtualWidth, y: virtualHeight }
 
     const element: CanvasElement = {
       id: this.generateId(),
       type: ElementType.SHAPE,
-      position: virtualPosition, // ✅ 使用虚拟坐标
-      size: virtualSize, // ✅ 使用虚拟尺寸
+      position: virtualPosition, // 使用虚拟坐标
+      size: virtualSize, // 使用虚拟尺寸
       rotation: 0,
       style: this.getDefaultStyle(),
       layer: 'default', // 这里需要从CanvasEngine获取当前图层ID

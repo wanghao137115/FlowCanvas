@@ -13,6 +13,9 @@ export class ViewportManager {
   private lastPanPoint: Vector2 = { x: 0, y: 0 }
   private panStartOffset: Vector2 = { x: 0, y: 0 }
   private onViewportChange?: (viewport: Viewport) => void
+  // 缩放状态追踪
+  private isZooming: boolean = false
+  private zoomEndTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(initialViewport: Viewport, onViewportChange?: (viewport: Viewport) => void) {
     this.viewport = { ...initialViewport }
@@ -32,6 +35,37 @@ export class ViewportManager {
    */
   getCoordinateTransformer(): CoordinateTransformer {
     return this.coordinateTransformer
+  }
+
+  /**
+   * 是否正在缩放中
+   */
+  getIsZooming(): boolean {
+    return this.isZooming
+  }
+
+  /**
+   * 开始缩放（设置缩放状态）
+   */
+  private startZooming(): void {
+    this.isZooming = true
+    // 清除之前的定时器
+    if (this.zoomEndTimer) {
+      clearTimeout(this.zoomEndTimer)
+    }
+  }
+
+  /**
+   * 结束缩放（延迟重置状态，让用户感觉更流畅）
+   */
+  private endZooming(): void {
+    // 延迟 150ms 后重置状态，给用户一个短暂的"隐藏"体验
+    if (this.zoomEndTimer) {
+      clearTimeout(this.zoomEndTimer)
+    }
+    this.zoomEndTimer = setTimeout(() => {
+      this.isZooming = false
+    }, 150)
   }
 
   /**
@@ -143,14 +177,77 @@ export class ViewportManager {
 
   /**
    * 缩放操作
+   * @param scale 缩放系数（如 1.1 表示放大 10%，0.9 表示缩小 10%）
+   * @param centerPoint 缩放中心点（虚拟坐标）
    */
   zoom(scale: number, centerPoint?: Vector2): void {
     const oldScale = this.viewport.scale
-    const newScale = Math.max(0.1, Math.min(5, scale))
+    // 使用当前 scale 乘以系数，得到新的缩放级别
+    let newScale = oldScale * scale
+
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+
+    if (newScale < minScale) {
+      newScale = minScale
+      console.log('[缩放] 已达到最小缩放倍数: 0.4096')
+    } else if (newScale > maxScale) {
+      newScale = maxScale
+      console.log('[缩放] 已达到最大缩放倍数: 1.5625')
+    }
+
+    console.log(`[缩放] 倍数: ${newScale.toFixed(4)} (变化: ${scale})`)
+
+    // 开始缩放状态
+    this.startZooming()
 
     if (centerPoint) {
-      // 以指定点为中心缩�?
-      const scaleRatio = newScale / oldScale
+      // 以指定点为中心缩放
+      // 正确的公式：缩放后，屏幕上的 centerPoint 位置应该对应同一个虚拟坐标
+      // screenX = (virtualX - offsetX) * scale
+      // 缩放前后：screenX = (centerPoint.x - oldOffsetX) * oldScale = (centerPoint.x - newOffsetX) * newScale
+      // 所以：newOffsetX = centerPoint.x - (centerPoint.x - oldOffsetX) * oldScale / newScale
+      const oldOffsetX = this.viewport.offset.x
+      const oldOffsetY = this.viewport.offset.y
+      const scaleRatio = oldScale / newScale
+      this.viewport.offset.x = centerPoint.x - (centerPoint.x - oldOffsetX) * scaleRatio
+      this.viewport.offset.y = centerPoint.y - (centerPoint.y - oldOffsetY) * scaleRatio
+      
+      console.log(`[缩放中心] 中心点(虚拟坐标):`, { x: centerPoint.x.toFixed(2), y: centerPoint.y.toFixed(2) })
+      console.log(`[缩放中心] offset变化:`, { oldX: oldOffsetX.toFixed(2), oldY: oldOffsetY.toFixed(2), newX: this.viewport.offset.x.toFixed(2), newY: this.viewport.offset.y.toFixed(2) })
+      console.log(`[缩放中心] 缩放比例: ${scaleRatio.toFixed(4)}`)
+    }
+
+    this.viewport.scale = newScale
+    this.coordinateTransformer.updateViewport(this.viewport)
+    this.triggerViewportChange()
+    // 结束缩放状态
+    this.endZooming()
+  }
+
+  /**
+   * 缩放到指定级别（绝对值）
+   * @param scale 目标缩放级别（如 2.0 表示放大到 200%）
+   * @param centerPoint 缩放中心点（虚拟坐标）
+   */
+  zoomTo(scale: number, centerPoint?: Vector2): void {
+    const oldScale = this.viewport.scale
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+    let newScale = scale
+    if (newScale < minScale) newScale = minScale
+    if (newScale > maxScale) newScale = maxScale
+
+    console.log(`[缩放] 倍数: ${newScale.toFixed(4)} (从 ${oldScale.toFixed(4)} 变化)`)
+
+    // 开始缩放状态
+    this.startZooming()
+
+    if (centerPoint) {
+      // 以指定点为中心缩放
+      const scaleRatio = oldScale / newScale
       this.viewport.offset.x = centerPoint.x - (centerPoint.x - this.viewport.offset.x) * scaleRatio
       this.viewport.offset.y = centerPoint.y - (centerPoint.y - this.viewport.offset.y) * scaleRatio
     }
@@ -158,13 +255,8 @@ export class ViewportManager {
     this.viewport.scale = newScale
     this.coordinateTransformer.updateViewport(this.viewport)
     this.triggerViewportChange()
-  }
-
-  /**
-   * 缩放到指定级�?
-   */
-  zoomTo(scale: number, centerPoint?: Vector2): void {
-    this.zoom(scale, centerPoint)
+    // 结束缩放状态
+    this.endZooming()
   }
 
   /**
@@ -173,9 +265,14 @@ export class ViewportManager {
   zoomToFit(bounds: { x: number; y: number; width: number; height: number }, padding: number = 50): void {
     const scaleX = (this.viewport.width - padding * 2) / bounds.width
     const scaleY = (this.viewport.height - padding * 2) / bounds.height
-    const scale = Math.min(scaleX, scaleY, 5) // 最大缩�?�?
+    // 缩放限制：最小 0.4096，最大 1.5625
+    const minScale = 0.4096
+    const maxScale = 1.5625
+    let scale = Math.min(scaleX, scaleY)
+    if (scale < minScale) scale = minScale
+    if (scale > maxScale) scale = maxScale
 
-    this.viewport.scale = Math.max(0.1, scale) // 最小缩�?.1�?
+    this.viewport.scale = scale
 
     // 计算居中偏移
     const scaledWidth = bounds.width * this.viewport.scale
@@ -192,7 +289,7 @@ export class ViewportManager {
    * 缩放�?00%
    */
   zoomToActualSize(): void {
-    this.zoom(1)
+    this.zoomTo(1)
   }
 
   /**
