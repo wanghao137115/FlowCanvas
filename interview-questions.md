@@ -692,32 +692,6 @@ function measureRender(name: string, fn: () => void) {
 
 ---
 
-## 六、Vue3 与 TypeScript 相关
-
-### 21. Vue3 的 Composition API 和 Options API 有什么区别？为什么选择 Composition API？
-
-**答：**
-1. **Composition API**：
-   - 逻辑复用更方便（Composable functions）
-   - 代码组织更灵活（按功能而非选项类型分组）
-   - 更好的 TypeScript 支持
-   -  tree-shaking 优化
-
-2. **选择原因**：
-   - 项目是复杂的大型应用，Composition API 更好组织代码
-   - Canvas 相关的逻辑较多，需要更好的逻辑复用
-   - TypeScript 类型推导更准确
-
----
-
-### 22. TypeScript 在项目中起到了什么作用？
-
-**答：**
-1. **类型安全**：减少运行时错误
-2. **类型推导**：IDE 智能提示更准确
-3. **接口定义**：Canvas 元素、工具、命令等都有完整的类型定义
-4. **重构支持**：大型重构时类型检查提供安全保障
-
 ---
 
 ### 23. Pinia 状态管理是如何使用的？
