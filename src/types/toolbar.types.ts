@@ -56,7 +56,8 @@ export enum ToolType {
   PEN = 'pen',
   ARROW = 'arrow',
   LINE = 'line',
-  IMAGE = 'image'
+  IMAGE = 'image',
+  HAND = 'hand'
 }
 
 /**

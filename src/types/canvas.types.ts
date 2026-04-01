@@ -149,7 +149,8 @@ export enum ToolType {
   LINE = 'line',
   ERASER = 'eraser',
   STYLE_BRUSH = 'styleBrush',
-  IMAGE = 'image'
+  IMAGE = 'image',
+  HAND = 'hand'
 }
 
 /**

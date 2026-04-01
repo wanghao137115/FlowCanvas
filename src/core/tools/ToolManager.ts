@@ -7,8 +7,10 @@ import { ArrowTool } from './ArrowTool'
 import { LineTool } from './LineTool'
 import { StyleBrushTool } from './StyleBrushTool'
 import { ImageTool } from './ImageTool'
+import { HandTool } from './HandTool'
 import { ToolType } from '@/types/canvas.types'
-import type { CanvasElement, ToolEvent } from '@/types/canvas.types'
+import type { CanvasElement } from '@/types/canvas.types'
+import type { ToolEvent } from './BaseTool'
 
 export interface ToolState {
   isDrawing?: boolean
@@ -47,6 +49,7 @@ export class ToolManager {
     this.tools.set(ToolType.LINE, new LineTool())
     this.tools.set(ToolType.STYLE_BRUSH, new StyleBrushTool())
     this.tools.set(ToolType.IMAGE, new ImageTool())
+    this.tools.set(ToolType.HAND, new HandTool())
   
   }
 
@@ -107,7 +110,11 @@ export class ToolManager {
    * 获取当前工具类型
    */
   getCurrentToolType(): ToolType {
-    return this.currentTool?.getToolType() || ToolType.SELECT
+    const toolType = this.currentTool?.getToolType()
+    if (toolType && Object.values(ToolType).includes(toolType as ToolType)) {
+      return toolType as ToolType
+    }
+    return ToolType.SELECT
   }
 
   /**
@@ -262,8 +269,10 @@ export class ToolManager {
       [ToolType.TEXT]: 'mdi:format-text',
       [ToolType.ARROW]: 'mdi:arrow-right',
       [ToolType.LINE]: 'mdi:minus',
+      [ToolType.ERASER]: 'mdi:eraser',
       [ToolType.STYLE_BRUSH]: 'mdi:format-paint',
-      [ToolType.IMAGE]: 'mdi:image'
+      [ToolType.IMAGE]: 'mdi:image',
+      [ToolType.HAND]: 'mdi:hand-back-right'
     }
     return iconMap[toolType] || 'mdi:help-circle'
   }
@@ -279,8 +288,10 @@ export class ToolManager {
       [ToolType.TEXT]: '文本工具',
       [ToolType.ARROW]: '箭头工具',
       [ToolType.LINE]: '直线工具',
+      [ToolType.ERASER]: '橡皮擦工具',
       [ToolType.STYLE_BRUSH]: '样式刷工具',
-      [ToolType.IMAGE]: '图片工具'
+      [ToolType.IMAGE]: '图片工具',
+      [ToolType.HAND]: '拖动工具'
     }
     return descriptionMap[toolType] || '未知工具'
   }

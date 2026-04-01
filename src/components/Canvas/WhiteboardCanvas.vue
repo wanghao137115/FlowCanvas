@@ -168,6 +168,14 @@
           >
             图片 (I)
           </el-button>
+          <el-button
+            :type="currentTool === 'hand' ? 'primary' : 'default'"
+            @click="setTool('hand')"
+            title="拖动工具 (H) - 拖动画布浏览"
+          >
+            <Icon icon="mdi:hand-back-right" />
+            拖动 (H)
+          </el-button>
         </el-button-group>
       </div>
 
@@ -895,6 +903,7 @@ onMounted(async () => {
     
     // 添加键盘事件监听
     window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
     
     // 初始渲染画布，确保画布可见
     canvasEngine.render()
@@ -950,6 +959,15 @@ onMounted(async () => {
   }
 })
 
+// 处理 Space 键释放，恢复之前的工具
+const handleKeyUp = (event: KeyboardEvent) => {
+  if (event.key === ' ' && previousToolForSpace && canvasEngine) {
+    event.preventDefault()
+    canvasEngine.setTool(previousToolForSpace as any)
+    previousToolForSpace = ''
+  }
+}
+
 // 清理资源
 onUnmounted(() => {
   if (canvasEngine) {
@@ -957,6 +975,7 @@ onUnmounted(() => {
   }
   window.removeEventListener('resize', updateCanvasSize)
   window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
 })
 
 // 初始化协作系统
@@ -2006,14 +2025,27 @@ const showShortcutHelp = () => {
 }
 
 // 键盘事件处理
+let previousToolForSpace = '' // 用于 Space 键临时切换
+
 const handleKeyDown = (event: KeyboardEvent) => {
   // 忽略在输入框中的按键
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
     return
   }
-  
+
   const key = event.key.toLowerCase()
-  
+
+  // Space 键临时激活拖动工具
+  if (event.key === ' ' && !event.repeat) {
+    event.preventDefault()
+    // 保存当前工具
+    if (canvasEngine) {
+      previousToolForSpace = canvasEngine.getCurrentTool()
+      canvasEngine.setTool('hand')
+    }
+    return
+  }
+
   // 如果当前是文本工具且正在编辑，优先处理文本输入
   if (canvasEngine && canvasEngine.getCurrentTool() === 'text') {
     const toolEvent = {
@@ -2058,6 +2090,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
       break
     case 'e':
       setTool('eraser')
+      break
+    case 'h':
+      setTool('hand')
       break
     case 'escape':
       // 取消当前操作
