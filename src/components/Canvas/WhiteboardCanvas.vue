@@ -321,7 +321,7 @@
       <!-- 浮动样式工具栏 -->
       <FloatingStyleToolbar
         ref="floatingToolbarRef"
-        :visible="showFloatingToolbar && (selectedElements.length > 0 || isTextEditing || isShapeTextEditing)"
+        :visible="showFloatingToolbar && !isSelectedElementRemoteOperated && (selectedElements.length > 0 || isTextEditing || isShapeTextEditing)"
         :selected-element="selectedElement"
         :selected-elements="selectedElements"
         :position="floatingToolbarPosition"
@@ -557,8 +557,14 @@ import CollaborationPanel from '@/components/Collaboration/CollaborationPanel.vu
 import ImageSelectorModal from '../ImageSelectorModal.vue'
 import TemplateSelectorModal from '../TemplateSelectorModal.vue'
 import { FlowTemplate } from '@/types/template.types'
-import { getCollaborationManager } from '@/core/collaboration'
+import { getCollaborationManager, type TransportConfig } from '@/core/collaboration'
 import type { CollaborationManager } from '@/core/collaboration'
+
+// WebSocket 配置
+const wsConfig: TransportConfig = {
+  type: 'websocket',
+  url: `ws://localhost:8081?room=flowcanvas-collab`
+}
 
 // 组件引用
 const canvasRef = ref<HTMLCanvasElement>()
@@ -584,6 +590,18 @@ const isShapeTextEditing = ref(false) // 标记是否正在编辑形状文字
 const showLayerPanel = ref(true) // 显示图层面板
 const layers = ref<any[]>([])
 const currentLayerId = ref<string | null>(null)
+
+// 远程操作的元素集合（由远程用户操作的元素ID）
+const remoteOperatedElements = ref<Set<string>>(new Set())
+
+// 远程操作 timeout 管理（用于清除之前的 timeout）
+const remoteOperatedTimeouts = ref<Map<string, number>>(new Map())
+
+// 检查选中元素是否被远程用户操作（如果是则隐藏浮动工具栏）
+const isSelectedElementRemoteOperated = computed(() => {
+  if (!selectedElement.value) return false
+  return remoteOperatedElements.value.has(selectedElement.value.id)
+})
 
 // 智能参考线状态
 const smartGuidesEnabled = ref(true) // 智能参考线是否启用
@@ -730,6 +748,11 @@ onMounted(async () => {
     
     // 设置元素创建回调
     canvasEngine.setOnElementCreated((element: any) => {
+      // 只有本地创建的元素才自动选中，远程操作添加的元素不选中
+      if (element._isRemoteAdded) {
+        delete element._isRemoteAdded
+        return
+      }
       // 自动选择新创建的元素并显示浮动工具栏
       selectElement(element)
       
@@ -834,10 +857,13 @@ onMounted(async () => {
     // 设置选择变化回调
     const debouncedSelectionChange = debounce((elements: any[]) => {
       selectedElements.value = elements
-        
+
         if (elements.length > 0) {
           selectedElement.value = elements[0] // 选择第一个元素作为主要选择
-          
+
+          // 清除该元素的远程操作标记，允许本地显示浮动工具栏
+          remoteOperatedElements.value.delete(elements[0].id)
+
           // 只有在非内部更新时才显示浮动工具栏
           if (!canvasEngine?.isInternalUpdate) {
             showFloatingToolbar.value = true
@@ -858,6 +884,9 @@ onMounted(async () => {
           selectedElement.value = null
           selectedElements.value = []
           showFloatingToolbar.value = false
+          
+          // 清空远程操作标记
+          remoteOperatedElements.value.clear()
           
           // 清空 canvasStore 的 selectedElementIds
           canvasStore.selectedElementIds = []
@@ -909,7 +938,9 @@ onMounted(async () => {
     canvasEngine.render()
     
     // 初始化协作系统
-    initCollaboration()
+    initCollaboration().catch((error) => {
+      console.error('[Canvas] 协作系统初始化失败:', error)
+    })
     
     // 延迟再次渲染，确保网格和标尺正确显示
     setTimeout(() => {
@@ -995,16 +1026,16 @@ const handleMouseMoveForCollab = (event: MouseEvent) => {
   collaborationManager.updateCursor(screenPos)
 }
 
-const initCollaboration = () => {
+const initCollaboration = async () => {
   try {
-    // 创建协作管理器
+    // 创建协作管理器（使用 WebSocket）
     collaborationManager = getCollaborationManager({
       enabled: true,
       channelName: 'flowcanvas-collab',
       showCursors: true,
       cursorFollowDelay: 50,
       showUserList: true
-    })
+    }, undefined, wsConfig)
     
     // 设置当前用户ID
     currentUserId.value = collaborationManager.getUserManager().getLocalUser().id
@@ -1019,8 +1050,8 @@ const initCollaboration = () => {
       }
     })
     
-    // 连接协作频道
-    collaborationManager.connect()
+    // 连接协作频道（异步）
+    await collaborationManager.connect()
     
     // 添加鼠标移动监听，广播光标位置
     const canvasEl = canvasRef.value
@@ -1102,9 +1133,11 @@ const handleRemoteOperation = (operation: any) => {
   try {
     switch (operation.type) {
       case 'add-element':
-        // 添加元素
+        // 添加元素（标记为远程添加，避免触发自动选中）
         if (operation.data) {
-          canvasEngine.addElement(operation.data)
+          // 标记元素为远程添加
+          const remoteData = { ...operation.data, _isRemoteAdded: true }
+          canvasEngine.addElement(remoteData)
         }
         break
         
@@ -1112,6 +1145,10 @@ const handleRemoteOperation = (operation: any) => {
         // 删除元素
         if (operation.elementId) {
           canvasEngine.deleteElement(operation.elementId)
+          // 如果正在显示这个被删除元素的工具栏，则隐藏
+          if (selectedElement.value?.id === operation.elementId) {
+            showFloatingToolbar.value = false
+          }
         }
         break
         
@@ -1126,7 +1163,21 @@ const handleRemoteOperation = (operation: any) => {
           const element = canvasEngine.getElement(operation.elementId)
           if (element) {
             Object.assign(element, operation.data)
+            // 标记元素被远程操作，隐藏本地浮动工具栏
+            remoteOperatedElements.value.add(operation.elementId)
+            canvasEngine.markDirty()
             canvasEngine.render()
+            // 重置 timeout（清除之前的 timeout，重新计时）
+            const existingTimeout = remoteOperatedTimeouts.value.get(operation.elementId)
+            if (existingTimeout) {
+              clearTimeout(existingTimeout)
+            }
+            // 500ms后移除标记，允许本地显示工具栏
+            const timeoutId = setTimeout(() => {
+              remoteOperatedElements.value.delete(operation.elementId)
+              remoteOperatedTimeouts.value.delete(operation.elementId)
+            }, 500)
+            remoteOperatedTimeouts.value.set(operation.elementId, timeoutId)
           }
         }
         break
@@ -1142,7 +1193,21 @@ const handleRemoteOperation = (operation: any) => {
           const element = canvasEngine.getElement(operation.elementId)
           if (element) {
             element.position = operation.data.position
+            // 标记元素被远程操作，隐藏本地浮动工具栏
+            remoteOperatedElements.value.add(operation.elementId)
+            canvasEngine.markDirty()
             canvasEngine.render()
+            // 重置 timeout（清除之前的 timeout，重新计时）
+            const existingTimeout = remoteOperatedTimeouts.value.get(operation.elementId)
+            if (existingTimeout) {
+              clearTimeout(existingTimeout)
+            }
+            // 500ms后移除标记，允许本地显示工具栏
+            const timeoutId = setTimeout(() => {
+              remoteOperatedElements.value.delete(operation.elementId)
+              remoteOperatedTimeouts.value.delete(operation.elementId)
+            }, 500)
+            remoteOperatedTimeouts.value.set(operation.elementId, timeoutId)
           }
         }
         break

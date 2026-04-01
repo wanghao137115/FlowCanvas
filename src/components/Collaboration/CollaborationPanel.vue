@@ -53,7 +53,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { CollaborationUser, CursorState } from '@/types/collaboration.types'
-import { getCollaborationManager } from '@/core/collaboration'
+import { getCollaborationManager, type TransportConfig } from '@/core/collaboration'
+
+// WebSocket 配置
+const wsConfig: TransportConfig = {
+  type: 'websocket',
+  url: `ws://localhost:8081?room=flowcanvas-collab`
+}
 
 interface Props {
   isEnabled?: boolean
@@ -68,7 +74,17 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 // 协作管理器
-const collaborationManager = getCollaborationManager()
+const collaborationManager = getCollaborationManager(
+  {
+    enabled: true,
+    channelName: 'flowcanvas-collab',
+    showCursors: true,
+    cursorFollowDelay: 50,
+    showUserList: true
+  },
+  undefined,
+  wsConfig
+)
 
 // 状态
 const isConnected = ref(false)
@@ -78,7 +94,7 @@ const cursors = ref<CursorState[]>([])
 // 拖动相关状态
 const isDragging = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
-const panelPosition = ref({ x: 12, y: 12 })
+const panelPosition = ref({ x: 300, y: 120 })
 
 // 面板样式
 const panelStyle = computed(() => ({
@@ -125,10 +141,15 @@ function stopDrag() {
 }
 
 // 初始化
-onMounted(() => {
-  // 连接协作
-  collaborationManager.connect()
-  isConnected.value = collaborationManager.isActive()
+onMounted(async () => {
+  // 连接协作（异步）
+  try {
+    await collaborationManager.connect()
+    isConnected.value = collaborationManager.isActive()
+  } catch (error) {
+    console.error('[Collab UI] 连接失败:', error)
+    isConnected.value = false
+  }
   
   // 获取初始用户列表
   users.value = collaborationManager.getUsers()

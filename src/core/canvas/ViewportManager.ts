@@ -197,7 +197,7 @@ export class ViewportManager {
       console.log('[缩放] 已达到最大缩放倍数: 1.5625')
     }
 
-    console.log(`[缩放] 倍数: ${newScale.toFixed(4)} (变化: ${scale})`)
+   
 
     // 开始缩放状态
     this.startZooming()
@@ -213,10 +213,7 @@ export class ViewportManager {
       const scaleRatio = oldScale / newScale
       this.viewport.offset.x = centerPoint.x - (centerPoint.x - oldOffsetX) * scaleRatio
       this.viewport.offset.y = centerPoint.y - (centerPoint.y - oldOffsetY) * scaleRatio
-      
-      console.log(`[缩放中心] 中心点(虚拟坐标):`, { x: centerPoint.x.toFixed(2), y: centerPoint.y.toFixed(2) })
-      console.log(`[缩放中心] offset变化:`, { oldX: oldOffsetX.toFixed(2), oldY: oldOffsetY.toFixed(2), newX: this.viewport.offset.x.toFixed(2), newY: this.viewport.offset.y.toFixed(2) })
-      console.log(`[缩放中心] 缩放比例: ${scaleRatio.toFixed(4)}`)
+   
     }
 
     this.viewport.scale = newScale

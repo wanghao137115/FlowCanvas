@@ -1,13 +1,15 @@
-import { 
-  CollaborationUser, 
-  CollaborationMessage, 
-  Operation, 
+import {
+  CollaborationUser,
+  CollaborationMessage,
+  Operation,
   CursorState,
   Vector2,
   CollaborationSettings
 } from '@/types/collaboration.types'
 import { UserManager } from './UserManager'
 import { CursorManager } from './CursorManager'
+import { WebSocketAdapter } from './WebSocketAdapter'
+import type { TransportAdapter, TransportConfig } from './TransportAdapter'
 
 /**
  * 消息类型常量
@@ -49,10 +51,10 @@ export interface CollaborationCallbacks {
 }
 
 /**
- * 协作管理器 - 基于BroadcastChannel实现多标签页实时协作
+ * 协作管理器 - 支持多种传输层 (WebSocket / BroadcastChannel)
  */
 export class CollaborationManager {
-  private channel: BroadcastChannel | null = null
+  private adapter: TransportAdapter | null = null
   private userManager: UserManager
   private cursorManager: CursorManager
   private settings: CollaborationSettings
@@ -62,12 +64,16 @@ export class CollaborationManager {
   private heartbeatInterval: number | null = null
   private cleanupInterval: number | null = null
 
-  constructor(settings: Partial<CollaborationSettings> = {}, userName?: string) {
+  constructor(
+    settings: Partial<CollaborationSettings> = {},
+    userName?: string,
+    transportConfig?: TransportConfig
+  ) {
     this.settings = { ...DEFAULT_SETTINGS, ...settings }
-    
+
     // 初始化用户管理器
     this.userManager = new UserManager(this.settings.userName || undefined)
-    
+
     // 初始化光标管理器
     this.cursorManager = new CursorManager({
       showLabel: this.settings.showCursors,
@@ -83,20 +89,76 @@ export class CollaborationManager {
     this.cursorManager.onCursorChange((cursors) => {
       this.callbacks.onCursorUpdate?.(cursors)
     })
+
+    // 初始化传输层
+    this.initTransport(transportConfig)
+  }
+
+  /**
+   * 初始化传输层
+   */
+  private initTransport(config?: TransportConfig): void {
+    const type = config?.type || 'websocket'
+    const url = config?.url || 'ws://localhost:8080'
+
+    switch (type) {
+      case 'websocket':
+        this.adapter = new WebSocketAdapter(url)
+        break
+      case 'broadcast':
+        // BroadcastChannel 暂时禁用
+        console.warn('[Collaboration] BroadcastChannel 已禁用，请使用 WebSocket')
+        this.adapter = new WebSocketAdapter(url)
+        break
+      default:
+        this.adapter = new WebSocketAdapter(url)
+    }
+
+    // 设置适配器回调
+    this.adapter.onMessage(this.handleMessage.bind(this))
+    this.adapter.onStatusChange((connected) => {
+      this.isConnected = connected
+      if (connected) {
+        console.log('[Collaboration] 传输层已连接')
+      } else {
+        console.log('[Collaboration] 传输层已断开')
+      }
+    })
+    this.adapter.onError?.((error) => {
+      this.callbacks.onError?.(error)
+    })
+  }
+
+  /**
+   * 获取传输适配器
+   */
+  getAdapter(): TransportAdapter | null {
+    return this.adapter
+  }
+
+  /**
+   * 切换传输层
+   */
+  switchTransport(config: TransportConfig): void {
+    const wasConnected = this.isConnected
+    if (wasConnected) {
+      this.disconnect()
+    }
+    this.initTransport(config)
+    if (wasConnected) {
+      this.connect()
+    }
   }
 
   /**
    * 初始化并连接协作频道
    */
-  connect(): void {
+  async connect(): Promise<void> {
     if (this.isConnected) return
 
     try {
-      // 创建BroadcastChannel
-      this.channel = new BroadcastChannel(this.settings.channelName)
-      
-      // 设置消息监听
-      this.channel.onmessage = this.handleMessage.bind(this)
+      // 使用传输适配器连接
+      await this.adapter?.connect()
 
       // 发送加入消息
       this.broadcastMessage({
@@ -121,7 +183,7 @@ export class CollaborationManager {
       this.startCleanup()
 
       this.isConnected = true
-      console.log('[Collaboration] 已连接到协作频道:', this.settings.channelName)
+      console.log('[Collaboration] 已连接到协作服务')
     } catch (error) {
       console.error('[Collaboration] 连接失败:', error)
       this.callbacks.onError?.(error as Error)
@@ -145,11 +207,9 @@ export class CollaborationManager {
     // 清理资源
     this.stopHeartbeat()
     this.stopCleanup()
-    
-    if (this.channel) {
-      this.channel.close()
-      this.channel = null
-    }
+
+    // 断开传输层
+    this.adapter?.disconnect()
 
     // 清理远程用户
     this.userManager.getAllUsers()
@@ -164,15 +224,13 @@ export class CollaborationManager {
    * 广播消息
    */
   private broadcastMessage(message: CollaborationMessage): void {
-    if (this.channel && this.isConnected) {
-      console.log('[Collab] 广播消息:', message.type, message.userId)
+    if (this.adapter?.isConnected()) {
+      // console.log('[Collab] 发送消息:', message.type, message.userId)
       try {
-        // 尝试克隆消息，确保可以被序列化
         const serializableMessage = this.makeSerializable(message)
-        this.channel.postMessage(serializableMessage)
+        this.adapter.send(serializableMessage)
       } catch (error) {
-        console.error('[Collab] 广播消息失败:', error)
-        // 静默处理序列化错误，避免阻塞正常功能
+        console.error('[Collab] 发送消息失败:', error)
       }
     }
   }
@@ -220,27 +278,31 @@ export class CollaborationManager {
   }
 
   /**
-   * 处理接收到的消息
+   * 处理接收到的消息（从传输适配器）
    */
-  private handleMessage(event: MessageEvent<CollaborationMessage>): void {
-    const { type, userId, timestamp, payload } = event.data
+  private handleMessage(message: CollaborationMessage): void {
+    const { type, userId, payload } = message
 
     // 忽略自己的消息
     if (userId === this.userManager.getLocalUser().id) return
 
     switch (type) {
+      case 'ping':
+        // 心跳响应，忽略
+        return
+
       case MESSAGE_TYPES.USER_JOIN:
         this.handleUserJoin(userId, payload)
         break
-        
+
       case MESSAGE_TYPES.USER_LEAVE:
         this.handleUserLeave(userId)
         break
-        
+
       case MESSAGE_TYPES.USER_LIST:
         this.handleUserList(payload)
         break
-        
+
       case MESSAGE_TYPES.OPERATION:
         this.handleOperation(userId, payload)
         break
@@ -552,10 +614,11 @@ let collaborationInstance: CollaborationManager | null = null
  */
 export function getCollaborationManager(
   settings?: Partial<CollaborationSettings>,
-  userName?: string
+  userName?: string,
+  transportConfig?: TransportConfig
 ): CollaborationManager {
   if (!collaborationInstance) {
-    collaborationInstance = new CollaborationManager(settings, userName)
+    collaborationInstance = new CollaborationManager(settings, userName, transportConfig)
   }
   return collaborationInstance
 }

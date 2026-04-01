@@ -1,5 +1,6 @@
 import type { CanvasElement, CanvasSettings, Viewport, Vector2, Layer } from '@/types/canvas.types'
 import { ToolType, ElementType } from '@/types/canvas.types'
+import { ShapeType } from '../tools/ShapeTool'
 import { ViewportManager } from './ViewportManager'
 import { Renderer } from './Renderer'
 import { EventManager } from './EventManager'
@@ -1285,14 +1286,17 @@ export class CanvasEngine {
       // 检查是否点击在现有元素上
       const virtualPos = this.viewportManager.getCoordinateTransformer().screenToVirtual(position)
       const clickedElement = this.getElementAtPosition(virtualPos)
- 
+
       if (clickedElement) {
-        
+
         // 检查是否是双击
         const currentTime = Date.now()
-        const isDoubleClick = (currentTime - this.lastClickTime < this.doubleClickThreshold) && 
-                             this.lastClickElement && 
+        const isDoubleClick = (currentTime - this.lastClickTime < this.doubleClickThreshold) &&
+                             this.lastClickElement &&
                              this.lastClickElement.id === clickedElement.id
+
+        // 自动选择适合的工具（基于元素类型）
+        this.autoSelectToolForElement(clickedElement)
         
         
         if (isDoubleClick && clickedElement.type === 'text') {
@@ -2674,8 +2678,10 @@ export class CanvasEngine {
     if (this.onElementsAdded) {
       this.onElementsAdded([element])
     }
-    
-    
+
+    // 设置脏标记，确保立即渲染
+    this.isDirty = true
+
     this.render()
   }
 
@@ -2736,6 +2742,9 @@ export class CanvasEngine {
       }
       
       this.render()
+      
+      // 设置脏标记
+      this.isDirty = true
     }
   }
 
@@ -2766,6 +2775,8 @@ export class CanvasEngine {
       }
       
       this.render()
+      // 设置脏标记
+      this.isDirty = true
       return true
     }
     return false
@@ -2790,6 +2801,8 @@ export class CanvasEngine {
       }
       
       this.render()
+      // 设置脏标记
+      this.isDirty = true
       return true
     }
     return false
@@ -2966,6 +2979,53 @@ export class CanvasEngine {
    */
   getCurrentTool(): ToolType {
     return this.toolManager.getCurrentToolType()
+  }
+
+  /**
+   * 根据元素类型自动选择合适的工具
+   * @param element 要操作的元素
+   * @param forceSelectTool 是否强制切换到选择工具（用于选中元素后的操作）
+   */
+  autoSelectToolForElement(element: CanvasElement, forceSelectTool: boolean = false): void {
+    const elementType = element.type
+
+    // 如果 forceSelectTool 为 true，直接使用选择工具
+    if (forceSelectTool) {
+      this.setCurrentTool(ToolType.SELECT)
+      return
+    }
+
+    // 根据元素类型映射到对应的工具
+    const toolMap: Record<string, ToolType> = {
+      'shape': ToolType.SHAPE,
+      'text': ToolType.TEXT,
+      'path': ToolType.PEN,
+      'image': ToolType.IMAGE,
+      'arrow': ToolType.ARROW,
+      'line': ToolType.LINE
+    }
+
+    const targetTool = toolMap[elementType]
+    if (targetTool) {
+      // 如果是形状元素，还需要设置具体的形状类型
+      if (elementType === 'shape') {
+        const shapeTool = this.toolManager.getTool(ToolType.SHAPE) as any
+        if (shapeTool && element.data?.shapeType) {
+          shapeTool.setShapeType(element.data.shapeType)
+          console.log(`[智能工具] 选中形状类型: ${element.data.shapeType}`)
+        }
+      }
+
+      // 如果当前工具与目标工具不同，才切换
+      const currentTool = this.getCurrentTool()
+      if (currentTool !== targetTool) {
+        this.setCurrentTool(targetTool)
+        console.log(`[智能工具] 自动切换工具: ${currentTool} -> ${targetTool}`)
+      }
+    } else {
+      // 未知类型，默认使用选择工具
+      this.setCurrentTool(ToolType.SELECT)
+    }
   }
 
   /**
@@ -4403,6 +4463,9 @@ export class CanvasEngine {
       this.onSelectionChange([])
     }
     
+    // 设置脏标记
+    this.isDirty = true
+    
     this.render()
   }
 
@@ -4416,6 +4479,7 @@ export class CanvasEngine {
       if (index !== -1) {
         this.elements.splice(index, 1)
     this.elements.push(element)
+        this.isDirty = true
         this.render()
       }
     }
@@ -4431,6 +4495,7 @@ export class CanvasEngine {
       if (index !== -1) {
         this.elements.splice(index, 1)
         this.elements.unshift(element)
+        this.isDirty = true
         this.render()
       }
     }
