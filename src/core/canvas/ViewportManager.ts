@@ -106,6 +106,7 @@ export class ViewportManager {
 
   /**
    * 更新平移（支持无限画布扩展，限制方向）
+   * 只限制超出边界的方向，其他方向仍然可以拖动
    */
   updatePanWithExpansion(screenPoint: Vector2, canvasEngine: any): void {
     if (!this.isPanning) return
@@ -113,44 +114,85 @@ export class ViewportManager {
     const deltaX = screenPoint.x - this.lastPanPoint.x
     const deltaY = screenPoint.y - this.lastPanPoint.y
 
-
-
-    // 检查当前可视范围内是否包含3.0k坐标，如果包含就禁止拖动
-    const canvasWidth = 800  // 默认画布宽度
-    const canvasHeight = 600  // 默认画布高度
-    
-    // 计算当前可视范围的虚拟坐标边界
-    const visibleLeft = this.panStartOffset.x
-    const visibleTop = this.panStartOffset.y
-    const visibleRight = this.panStartOffset.x + canvasWidth / this.viewport.scale
-    const visibleBottom = this.panStartOffset.y + canvasHeight / this.viewport.scale
-    
-    // 检查是否到达3.0k边界，如果到达则完全禁止拖动
+    const canvasWidth = this.viewport.width
+    const canvasHeight = this.viewport.height
     const maxBoundary = 3000
-    const is3kVisibleX = visibleLeft <= maxBoundary && visibleRight >= maxBoundary
-    const is3kVisibleY = visibleTop <= maxBoundary && visibleBottom >= maxBoundary
-    
 
-    
-    // 如果3.0k在可视范围内，完全禁止拖动（不显示右边空白）
-    if (is3kVisibleX || is3kVisibleY) {
-
-      return
-    }
-    
-    // 计算新的偏移值
+    // 计算新的偏移值（这是没有限制的理论值）
     let newOffsetX = this.panStartOffset.x - deltaX / this.viewport.scale
     let newOffsetY = this.panStartOffset.y - deltaY / this.viewport.scale
-    
-    // 确保偏移值在边界内
-    newOffsetX = Math.max(0, Math.min(maxBoundary, newOffsetX))
-    newOffsetY = Math.max(0, Math.min(maxBoundary, newOffsetY))
 
+    // 获取元素边界（如果有选中元素，使用元素边界；否则使用画布边界）
+    const elementBounds = canvasEngine?.getSelectedElementsBounds?.()
+    const canvasBounds = canvasEngine?.getCanvasBounds?.()
+
+    // 确定内容边界
+    let contentMinX = elementBounds?.minX ?? canvasBounds?.minX ?? 0
+    let contentMinY = elementBounds?.minY ?? canvasBounds?.minY ?? 0
+    let contentMaxX = elementBounds?.maxX ?? canvasBounds?.maxX ?? maxBoundary
+    let contentMaxY = elementBounds?.maxY ?? canvasBounds?.maxY ?? maxBoundary
+
+    // 当前视口边界
+    const currentLeft = this.viewport.offset.x
+    const currentTop = this.viewport.offset.y
+    const currentRight = currentLeft + canvasWidth / this.viewport.scale
+    const currentBottom = currentTop + canvasHeight / this.viewport.scale
+
+    // 判断拖动方向（相对于鼠标）
+    const mouseMovingRight = deltaX > 0   // 鼠标向右移动
+    const mouseMovingDown = deltaY > 0    // 鼠标向下移动
+
+    // 内容是否在左边界
+    const contentAtLeftEdge = contentMinX <= 0
+    const contentAtTopEdge = contentMinY <= 0
+    const contentAtRightEdge = contentMaxX >= maxBoundary
+    const contentAtBottomEdge = contentMaxY >= maxBoundary
+
+    // 视口是否在边界
+    const viewportAtLeftEdge = currentLeft <= 0
+    const viewportAtTopEdge = currentTop <= 0
+    const viewportAtRightEdge = currentRight >= maxBoundary
+    const viewportAtBottomEdge = currentBottom >= maxBoundary
+
+    // 只在以下情况限制：
+    // 1. 内容在左边界 + 拖动向左会导致 offset < 0
+    // 2. 内容在右边界 + 拖动向右会导致视口超出边界
+    // 3. 内容在上边界 + 拖动向上会导致 offset < 0
+    // 4. 内容在下边界 + 拖动向下会导致视口超出边界
+
+    // 对于 X 轴：
+    if (contentAtLeftEdge && viewportAtLeftEdge) {
+      // 左边界：不允许拖动导致 offsetX < 0
+      if (newOffsetX < 0) {
+        newOffsetX = 0
+      }
+    }
+    if (contentAtRightEdge && viewportAtRightEdge) {
+      // 右边界：不允许拖动导致视口超出 maxBoundary
+      const maxOffsetX = maxBoundary - canvasWidth / this.viewport.scale
+      if (newOffsetX > maxOffsetX) {
+        newOffsetX = maxOffsetX
+      }
+    }
+
+    // 对于 Y 轴：
+    if (contentAtTopEdge && viewportAtTopEdge) {
+      // 上边界：不允许拖动导致 offsetY < 0
+      if (newOffsetY < 0) {
+        newOffsetY = 0
+      }
+    }
+    if (contentAtBottomEdge && viewportAtBottomEdge) {
+      // 下边界：不允许拖动导致视口超出 maxBoundary
+      const maxOffsetY = maxBoundary - canvasHeight / this.viewport.scale
+      if (newOffsetY > maxOffsetY) {
+        newOffsetY = maxOffsetY
+      }
+    }
 
     // 更新视口偏移
     this.viewport.offset.x = newOffsetX
     this.viewport.offset.y = newOffsetY
-
 
     // 检查是否需要扩展画布
     if (canvasEngine) {

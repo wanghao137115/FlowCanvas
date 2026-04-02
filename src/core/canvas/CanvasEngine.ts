@@ -6211,6 +6211,31 @@ export class CanvasEngine {
   }
 
   /**
+   * 获取选中元素的边界框
+   */
+  getSelectedElementsBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const selectedIds = this.selectedElementIds
+    if (selectedIds.length === 0) return null
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+
+    for (const id of selectedIds) {
+      const element = this.elements.find(el => el.id === id)
+      if (element) {
+        const bounds = this.getElementBounds(element)
+        minX = Math.min(minX, bounds.x)
+        minY = Math.min(minY, bounds.y)
+        maxX = Math.max(maxX, bounds.x + bounds.width)
+        maxY = Math.max(maxY, bounds.y + bounds.height)
+      }
+    }
+
+    if (minX === Infinity) return null
+
+    return { minX, minY, maxX, maxY }
+  }
+
+  /**
    * 设置画布扩展回调
    */
   setOnCanvasExpansion(callback: (bounds: { minX: number; minY: number; maxX: number; maxY: number }) => void): void {
