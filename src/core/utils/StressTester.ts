@@ -176,9 +176,9 @@ class StressTester {
           ...baseElement,
           type: ElementType.SHAPE,
           shapeType: ['rectangle', 'circle', 'triangle', 'star'][index % 4] as any,
-          size: { 
-            width: 50 + Math.random() * 100, 
-            height: 50 + Math.random() * 100 
+          size: {
+            width: 50 + Math.random() * 100,
+            height: 50 + Math.random() * 100
           }
         }
 
@@ -211,14 +211,8 @@ class StressTester {
           ]
         }
 
+      // 跳过 IMAGE 类型，因为它需要真实图片数据
       case ElementType.IMAGE:
-        return {
-          ...baseElement,
-          type: ElementType.IMAGE,
-          src: '',
-          size: { width: 100, height: 100 }
-        }
-
       default:
         return baseElement as CanvasElement
     }

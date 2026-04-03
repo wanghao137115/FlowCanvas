@@ -161,21 +161,22 @@ export class ThumbnailGenerator {
    * 绘制单个元素
    */
   private async drawElement(element: CanvasElement, bounds: { x: number; y: number; width: number; height: number }): Promise<void> {
+    const size = this.getElementSize(element)
 
     this.ctx.save()
 
     // 计算元素中心点（相对于缩略图边界）
-    const centerX = element.position.x + element.size.x / 2 - bounds.x
-    const centerY = element.position.y + element.size.y / 2 - bounds.y
-    
+    const centerX = element.position.x + size.x / 2 - bounds.x
+    const centerY = element.position.y + size.y / 2 - bounds.y
+
     // 移动到元素中心点
     this.ctx.translate(centerX, centerY)
-    
+
     // 应用旋转（以中心点为基准）
     this.ctx.rotate(((element.rotation || 0) * Math.PI) / 180) // 将角度转换为弧度
-    
+
     // 移动到元素的左上角（相对于中心点）
-    this.ctx.translate(-element.size.x / 2, -element.size.y / 2)
+    this.ctx.translate(-size.x / 2, -size.y / 2)
 
     // 设置样式
     this.ctx.fillStyle = element.style.fill || 'transparent'
@@ -213,7 +214,9 @@ export class ThumbnailGenerator {
    * 绘制形状元素
    */
   private drawShapeElement(element: CanvasElement): void {
-    const { x: width, y: height } = element.size
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const shapeType = element.data?.shapeType || 'rectangle'
 
     this.ctx.beginPath()
@@ -269,10 +272,12 @@ export class ThumbnailGenerator {
    * 绘制文本元素
    */
   private drawTextElement(element: CanvasElement): void {
-    const { x: width, y: height } = element.size
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const text = element.data?.text || 'Text'
     const fontSize = Math.min(width, height) * 0.3
-    
+
     this.ctx.fillStyle = element.style.fill || '#000000'
     this.ctx.font = `${fontSize}px Arial`
     this.ctx.textAlign = 'center'
@@ -311,7 +316,9 @@ export class ThumbnailGenerator {
    * 绘制线条元素
    */
   private drawLineElement(element: CanvasElement): void {
-    const { x: width, y: height } = element.size
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const points = element.data?.points || []
 
     this.ctx.strokeStyle = element.style.stroke || '#000000'
@@ -319,11 +326,11 @@ export class ThumbnailGenerator {
     this.ctx.lineCap = 'round'
 
     this.ctx.beginPath()
-    
+
     if (points.length >= 2) {
       // 如果有路径点，直接使用路径点坐标（与Renderer保持一致）
       this.ctx.moveTo(points[0].x, points[0].y)
-      
+
       for (let i = 1; i < points.length; i++) {
         this.ctx.lineTo(points[i].x, points[i].y)
       }
@@ -332,7 +339,7 @@ export class ThumbnailGenerator {
       this.ctx.moveTo(0, height / 2)
       this.ctx.lineTo(width, height / 2)
     }
-    
+
     this.ctx.stroke()
   }
 
@@ -340,7 +347,9 @@ export class ThumbnailGenerator {
    * 绘制箭头元素
    */
   private drawArrowElement(element: CanvasElement): void {
-    const { x: width, y: height } = element.size
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const points = element.data?.points || []
 
     this.ctx.strokeStyle = element.style.stroke || '#000000'
@@ -364,6 +373,41 @@ export class ThumbnailGenerator {
       this.ctx.lineTo(width, height / 2)
       this.ctx.stroke()
     }
+  }
+
+  /**
+   * 安全获取元素尺寸
+   * 处理不同类型元素可能没有 size 属性的情况
+   */
+  private getElementSize(element: CanvasElement): { x: number; y: number } {
+    // 如果元素有 size 属性，直接使用
+    if (element.size && element.size.x !== undefined && element.size.y !== undefined) {
+      return { x: element.size.x, y: element.size.y }
+    }
+
+    // LINE 和 ARROW：从 points 属性计算
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y)
+          maxY = Math.max(maxY, p.y)
+        }
+        return { x: maxX - minX || 1, y: maxY - minY || 1 }
+      }
+    }
+
+    // TEXT：使用 fontSize 估算
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return { x: fontSize * 10, y: fontSize * 1.5 }
+    }
+
+    // 默认返回小尺寸
+    return { x: 50, y: 50 }
   }
 
   /**
@@ -378,10 +422,11 @@ export class ThumbnailGenerator {
     let maxY = -Infinity
 
     elements.forEach(element => {
+      const size = this.getElementSize(element)
       minX = Math.min(minX, element.position.x)
       minY = Math.min(minY, element.position.y)
-      maxX = Math.max(maxX, element.position.x + element.size.x)
-      maxY = Math.max(maxY, element.position.y + element.size.y)
+      maxX = Math.max(maxX, element.position.x + size.x)
+      maxY = Math.max(maxY, element.position.y + size.y)
     })
 
     const bounds = {
@@ -440,10 +485,12 @@ export class ThumbnailGenerator {
    * 绘制图片元素
    */
   private async drawImageElement(element: CanvasElement): Promise<void> {
-    const { x: width, y: height } = element.size
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const imageData = element.data as ImageElementData
-    
-    
+
+
     // 如果有缩略图，直接使用
     if (imageData?.thumbnail) {
       await this.drawImageWithPromise(imageData.thumbnail, width, height)

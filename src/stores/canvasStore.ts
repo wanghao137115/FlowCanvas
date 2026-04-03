@@ -63,18 +63,7 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   // 视口操作
   const updateViewport = (newViewport: Partial<Viewport>) => {
-    console.log('🔄 updateViewport 调用:', {
-      newViewport,
-      currentViewport: { ...viewport },
-      hasOffset: !!viewport.offset,
-      offsetValue: viewport.offset
-    })
     Object.assign(viewport, newViewport)
-    console.log('✅ updateViewport 完成:', {
-      updatedViewport: { ...viewport },
-      hasOffset: !!viewport.offset,
-      offsetValue: viewport.offset
-    })
   }
 
   const zoomTo = (scale: number, center?: { x: number; y: number }) => {

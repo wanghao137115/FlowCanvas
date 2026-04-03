@@ -64,6 +64,11 @@ export class HandTool extends BaseTool {
     super.activate()
     this.setCursor('grab')
     console.log('[HandTool] 拖动工具已激活')
+
+    // 清除元素选择，避免显示浮动工具栏和变换手柄
+    if (this.canvasEngine) {
+      this.canvasEngine.clearSelection()
+    }
   }
 
   /**
@@ -170,9 +175,14 @@ export class HandTool extends BaseTool {
         this.previousTool = this.canvasEngine.toolManager.getCurrentToolType()
       }
 
-      // 激活拖动工具
+      // 激活拖动工具（会清除选择）
       if (!this.state.isActive) {
         this.activate()
+      } else {
+        // 如果已经激活，只清除选择
+        if (this.canvasEngine) {
+          this.canvasEngine.clearSelection()
+        }
       }
       this.setCursor('grab')
       console.log('[HandTool] Space 键激活拖动工具', { previousTool: this.previousTool })

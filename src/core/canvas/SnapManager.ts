@@ -204,7 +204,34 @@ export class SnapManager {
   }
 
   /**
-   * 获取元素边界信息（基于当前位置）
+   * Safe get element size
+   */
+  private getElementSize(element: CanvasElement): { x: number; y: number } {
+    if (element.size && element.size.x !== undefined && element.size.y !== undefined) {
+      return { x: element.size.x, y: element.size.y }
+    }
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y)
+          maxY = Math.max(maxY, p.y)
+        }
+        return { x: maxX - minX || 1, y: maxY - minY || 1 }
+      }
+    }
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return { x: fontSize * 10, y: fontSize * 1.5 }
+    }
+    return { x: 50, y: 50 }
+  }
+
+  /**
+   * Get element bounds info
    */
   private getElementBounds(element: CanvasElement, position: Vector2): {
     top: number
@@ -214,18 +241,19 @@ export class SnapManager {
     centerX: number
     centerY: number
   } {
+    const size = this.getElementSize(element)
     return {
       top: position.y,
       left: position.x,
-      bottom: position.y + element.size.y,
-      right: position.x + element.size.x,
-      centerX: position.x + element.size.x / 2,
-      centerY: position.y + element.size.y / 2
+      bottom: position.y + size.y,
+      right: position.x + size.x,
+      centerX: position.x + size.x / 2,
+      centerY: position.y + size.y / 2
     }
   }
 
   /**
-   * 获取吸附提示信息
+   * Get snap hint info
    */
   getSnapHint(guides: AlignmentGuide[]): string[] {
     const hints: string[] = []

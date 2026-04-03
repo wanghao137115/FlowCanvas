@@ -321,7 +321,7 @@
       <!-- 浮动样式工具栏 -->
       <FloatingStyleToolbar
         ref="floatingToolbarRef"
-        :visible="showFloatingToolbar && !isSelectedElementRemoteOperated && (selectedElements.length > 0 || isTextEditing || isShapeTextEditing)"
+        :visible="showFloatingToolbar && !isSelectedElementRemoteOperated && currentTool !== 'hand' && (selectedElements.length > 0 || isTextEditing || isShapeTextEditing)"
         :selected-element="selectedElement"
         :selected-elements="selectedElements"
         :position="floatingToolbarPosition"
@@ -812,10 +812,12 @@ onMounted(async () => {
         showFloatingToolbar.value = false
       },
       (element: any) => {
-        // 显示浮动工具栏
-        selectedElement.value = element
-        selectedElements.value = [element]
-        showFloatingToolbar.value = true
+        // 显示浮动工具栏（非拖动工具时）
+        if (currentTool.value !== 'hand') {
+          selectedElement.value = element
+          selectedElements.value = [element]
+          showFloatingToolbar.value = true
+        }
       }
     )
 
@@ -839,13 +841,15 @@ onMounted(async () => {
     // 设置形状文字编辑状态变化回调
     canvasEngine.setOnShapeTextEditStateChange((isEditing: boolean, element?: any) => {
       isShapeTextEditing.value = isEditing
-      
+
       if (isEditing && element) {
-        // 进入形状文字编辑模式时，选中该元素并显示浮动工具栏
-        selectedElement.value = element
-        selectedElements.value = [element]
-        showFloatingToolbar.value = true
-        updateFloatingToolbarPosition([element])
+        // 进入形状文字编辑模式时，选中该元素并显示浮动工具栏（非拖动工具时）
+        if (currentTool.value !== 'hand') {
+          selectedElement.value = element
+          selectedElements.value = [element]
+          showFloatingToolbar.value = true
+          updateFloatingToolbarPosition([element])
+        }
       } else {
         // 退出编辑模式时，清除选中状态
         selectedElement.value = null
@@ -864,18 +868,18 @@ onMounted(async () => {
           // 清除该元素的远程操作标记，允许本地显示浮动工具栏
           remoteOperatedElements.value.delete(elements[0].id)
 
-          // 只有在非内部更新时才显示浮动工具栏
-          if (!canvasEngine?.isInternalUpdate) {
+          // 只有在非内部更新且非拖动工具时才显示浮动工具栏
+          if (!canvasEngine?.isInternalUpdate && currentTool.value !== 'hand') {
             showFloatingToolbar.value = true
           }
-        
+
         // 计算浮动工具栏位置
         updateFloatingToolbarPosition(elements)
-        
+
         // 更新 canvasStore 的 selectedElementIds
         const elementIds = elements.map(el => el.id)
         canvasStore.selectedElementIds = elementIds
-        
+
         // 同步到 CanvasEngine
         if (canvasEngine) {
           canvasEngine.setSelectedElementIds(elementIds)
@@ -1317,18 +1321,22 @@ const updateFloatingToolbarPosition = (elements: any[]) => {
       // 获取视口管理器来计算正确的屏幕坐标
       const viewportManager = canvasEngine.getViewportManager()
       const coordinateTransformer = viewportManager.getCoordinateTransformer()
-      
+
+      // 安全获取元素尺寸
+      const sizeX = (element as any).size?.x ?? 50
+      const sizeY = (element as any).size?.y ?? 50
+
       // 计算形状的中心位置（虚拟坐标）
-      const centerX = element.position.x + element.size.x / 2
-      const centerY = element.position.y + element.size.y / 2
-      
+      const centerX = element.position.x + sizeX / 2
+      const centerY = element.position.y + sizeY / 2
+
       // 将虚拟坐标转换为屏幕坐标
       const screenCenter = coordinateTransformer.virtualToScreen({ x: centerX, y: centerY })
-      
+
       // 计算形状的顶部位置，然后向上偏移100px
       const shapeTop = element.position.y
       const shapeTopScreen = coordinateTransformer.virtualToScreen({ x: centerX, y: shapeTop })
-      
+
       floatingToolbarPosition.value = {
         x: screenCenter.x, // 设置为中心点，组件会自动居中
         y: shapeTopScreen.y - 100 // 在形状顶部上方100px
@@ -1341,13 +1349,15 @@ const updateFloatingToolbarPosition = (elements: any[]) => {
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
-    
+
     elements.forEach(element => {
-      const { position, size } = element
+      const { position } = element
+      const sizeX = (element as any).size?.x ?? 50
+      const sizeY = (element as any).size?.y ?? 50
       minX = Math.min(minX, position.x)
       minY = Math.min(minY, position.y)
-      maxX = Math.max(maxX, position.x + size.x)
-      maxY = Math.max(maxY, position.y + size.y)
+      maxX = Math.max(maxX, position.x + sizeX)
+      maxY = Math.max(maxY, position.y + sizeY)
     })
     
     // 计算包围框的中心位置（虚拟坐标）

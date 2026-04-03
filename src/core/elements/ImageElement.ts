@@ -108,13 +108,19 @@ export class ImageElement implements CanvasElement {
    * 计算初始尺寸
    */
   private calculateInitialSize(): Vector2 {
+    // 安全获取 data 属性
+    if (!this.data || this.data.originalWidth === undefined || this.data.originalHeight === undefined) {
+      // 返回默认尺寸
+      return { x: 100, y: 100 }
+    }
+
     const { originalWidth, originalHeight } = this.data
     const maxWidth = 500 // 最大宽度限制为500px
-    
+
     if (originalWidth <= maxWidth) {
       return { x: originalWidth, y: originalHeight }
     }
-    
+
     // 按比例缩放，保持宽高比
     const scale = maxWidth / originalWidth
     return {

@@ -1248,8 +1248,13 @@ export class CanvasEngine {
         return
       }
 
-      // 检测复制模式
-      this.detectCopyMode(position)
+      // 检查是否是拖动工具（手型工具）
+      const isHandTool = currentTool?.getName() === 'hand'
+
+      // 检测复制模式（拖动工具跳过）
+      if (!isHandTool) {
+        this.detectCopyMode(position)
+      }
 
       // 检查是否点击了连接点（如果正在拖拽连接线，优先处理）
       if (this.isDraggingConnection) {
@@ -1258,29 +1263,45 @@ export class CanvasEngine {
         return
       }
 
-      // 优先检查连接点点击（在任何其他检测之前）
-      const hoveredElement = this.getHoveredElement()
-      
-      if (hoveredElement) {
-        const connectionPoint = this.checkConnectionPointClick(position, hoveredElement)
-        if (connectionPoint) {
-          // 开始连接线拖拽
-          this.startConnectionDrag(connectionPoint, hoveredElement)
-          return
+      // 优先检查连接点点击（在任何其他检测之前）- 拖动工具跳过
+      if (!isHandTool) {
+        const hoveredElement = this.getHoveredElement()
+
+        if (hoveredElement) {
+          const connectionPoint = this.checkConnectionPointClick(position, hoveredElement)
+          if (connectionPoint) {
+            // 开始连接线拖拽
+            this.startConnectionDrag(connectionPoint, hoveredElement)
+            return
+          }
         }
       }
 
-      // 优先检查变换手柄状态（无论当前是什么工具）
+      // 优先检查变换手柄状态（无论当前是什么工具）- 允许拖动工具操作变换手柄
       if (this.selectedElementIds.length > 0) {
         // 检查是否点击在变换手柄上
         const handleAtPosition = this.transformManager.getHandleAtPosition(position);
-        
+
         if (handleAtPosition) {
           // 点击在变换手柄上，开始变换
           this.transformManager.startTransform(position, handleAtPosition)
           this.render()
           return
         }
+      }
+
+      // 如果是拖动工具，拖动画布，不选择元素
+      if (isHandTool) {
+        // 检查是否点击在变换手柄上 - 如果是拖动工具，变换手柄也不能操作
+        if (this.selectedElementIds.length > 0) {
+          const handleAtPosition = this.transformManager.getHandleAtPosition(position);
+          if (handleAtPosition) {
+            // 拖动工具下点击变换手柄也不响应
+            return
+          }
+        }
+        this.toolManager.handleMouseDown(toolEvent)
+        return
       }
 
       // 检查是否点击在现有元素上
@@ -1386,13 +1407,22 @@ export class CanvasEngine {
       return // 阻止拖拽，让用户专注于文字编辑
     }
 
+    // 检查是否是拖动工具（手型工具）
+    const isHandTool = this.toolManager.getCurrentTool()?.getName() === 'hand'
+
     // 如果鼠标没有按下，只处理悬浮效果，不处理拖动
     if (!this.isMouseDown) {
-      // 检查是否悬浮在变换手柄上
-      this.checkTransformHandleHover(position)
-      // 检查连接点悬浮
-      this.checkConnectionPointHover(position)
-      this.requestRender()
+      // 拖动工具跳过悬浮检查（保持抓取光标）
+      if (!isHandTool) {
+        // 检查是否悬浮在变换手柄上
+        this.checkTransformHandleHover(position)
+        // 检查连接点悬浮
+        this.checkConnectionPointHover(position)
+        this.requestRender()
+      } else {
+        // 拖动工具保持抓取光标
+        this.canvas.style.cursor = 'grab'
+      }
       return
     }
 
@@ -1442,7 +1472,14 @@ export class CanvasEngine {
 
     // 检查当前工具
     const currentTool = this.toolManager.getCurrentTool()
-    
+
+    // 如果是拖动工具，让工具处理移动（用于拖动画布）
+    if (currentTool && currentTool.getName() === 'hand') {
+      currentTool.onMouseMove(toolEvent)
+      this.requestRender()
+      return
+    }
+
     // 如果是格式刷工具，直接处理鼠标移动，不进行拖拽
     if (currentTool && currentTool.getName() === 'styleBrush') {
       currentTool.onMouseMove(toolEvent)
@@ -1888,8 +1925,13 @@ export class CanvasEngine {
    * 渲染变换手柄
    */
   private renderTransformHandles(ctx: CanvasRenderingContext2D): void {
+    // 拖动工具下不渲染变换手柄
+    if (this.toolManager.getCurrentTool()?.getName() === 'hand') {
+      return
+    }
+
     if (this.selectedElementIds.length === 0) return
-    
+
     // 获取选中的元素
     const selectedElements = this.elements.filter(el => this.selectedElementIds.includes(el.id))
     if (selectedElements.length === 0) return
@@ -4031,14 +4073,55 @@ export class CanvasEngine {
    */
   private getElementBounds(element: CanvasElement): { x: number; y: number; width: number; height: number } {
     const { position, size } = element
-    
-    // 简单处理：返回轴对齐包围盒
-    // 对于旋转元素，这里可以进一步优化计算精确的旋转包围盒
+
+    // 如果元素有 size 属性，直接使用
+    if (size && size.x !== undefined && size.y !== undefined) {
+      return {
+        x: position.x,
+        y: position.y,
+        width: size.x,
+        height: size.y
+      }
+    }
+
+    // 对于没有 size 的元素（如 LINE, ARROW, TEXT），尝试从数据中计算
+    // LINE 和 ARROW 有 points 属性
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          minY = Math.min(minY, p.y)
+          maxX = Math.max(maxX, p.x)
+          maxY = Math.max(maxY, p.y)
+        }
+        return {
+          x: position.x + minX,
+          y: position.y + minY,
+          width: maxX - minX || 1,
+          height: maxY - minY || 1
+        }
+      }
+    }
+
+    // TEXT 元素使用默认值
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return {
+        x: position.x,
+        y: position.y,
+        width: fontSize * 10, // 估算宽度
+        height: fontSize * 1.5
+      }
+    }
+
+    // 默认返回一个小的包围盒
     return {
       x: position.x,
       y: position.y,
-      width: size.x,
-      height: size.y
+      width: 10,
+      height: 10
     }
   }
 
@@ -4887,13 +4970,41 @@ export class CanvasEngine {
   }
 
   private isPointInsideBoundingBox(point: Vector2, element: CanvasElement): boolean {
-    const { position, size } = element
+    const { position } = element
+    const size = this.getElementSize(element)
     return (
       point.x >= position.x &&
       point.x <= position.x + size.x &&
       point.y >= position.y &&
       point.y <= position.y + size.y
     )
+  }
+
+  /**
+   * Safe get element size
+   */
+  private getElementSize(element: CanvasElement): { x: number; y: number } {
+    if (element.size && element.size.x !== undefined && element.size.y !== undefined) {
+      return { x: element.size.x, y: element.size.y }
+    }
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y)
+          maxY = Math.max(maxY, p.y)
+        }
+        return { x: maxX - minX || 1, y: maxY - minY || 1 }
+      }
+    }
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return { x: fontSize * 10, y: fontSize * 1.5 }
+    }
+    return { x: 50, y: 50 }
   }
 
   private isPointNearPath(point: Vector2, element: CanvasElement): boolean {

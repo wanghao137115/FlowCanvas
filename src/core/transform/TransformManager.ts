@@ -330,21 +330,23 @@ export class TransformManager {
 
     if (this.selectedElements.length === 1) {
       const element = this.selectedElements[0]
+      const size = this.getElementSize(element)
       return {
         x: element.position.x,
         y: element.position.y,
-        width: element.size.x,
-        height: element.size.y
+        width: size.x,
+        height: size.y
       }
     }
 
-    // 多个元素时，计算包围�?
+    // multiple elements
     const points: Vector2[] = []
     this.selectedElements.forEach(element => {
+      const size = this.getElementSize(element)
       points.push(element.position)
       points.push({
-        x: element.position.x + element.size.x,
-        y: element.position.y + element.size.y
+        x: element.position.x + size.x,
+        y: element.position.y + size.y
       })
     })
 
@@ -352,7 +354,34 @@ export class TransformManager {
   }
 
   /**
-   * 渲染连接�?
+   * Safe get element size
+   */
+  private getElementSize(element: CanvasElement): { x: number; y: number } {
+    if (element.size && element.size.x !== undefined && element.size.y !== undefined) {
+      return { x: element.size.x, y: element.size.y }
+    }
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y)
+          maxY = Math.max(maxY, p.y)
+        }
+        return { x: maxX - minX || 1, y: maxY - minY || 1 }
+      }
+    }
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return { x: fontSize * 10, y: fontSize * 1.5 }
+    }
+    return { x: 50, y: 50 }
+  }
+
+  /**
+   * Render connection lines
    */
   private renderConnectionLines(ctx: CanvasRenderingContext2D): void {
     if (this.selectedElements.length <= 1) return

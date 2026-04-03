@@ -540,9 +540,10 @@ export class Renderer {
   private getVisibleElements(elements: CanvasElement[], viewport: any): CanvasElement[] {
     return elements.filter(element => {
       const screenPos = this.coordinateTransformer.virtualToScreen(element.position)
+      const size = this.getElementSize(element)
       const screenSize = this.coordinateTransformer.virtualToScreen({
-        x: element.size.x,
-        y: element.size.y
+        x: size.x,
+        y: size.y
       })
 
       return screenPos.x < viewport.width &&
@@ -553,6 +554,41 @@ export class Renderer {
   }
 
   /**
+   * 安全获取元素尺寸
+   * 处理不同类型元素可能没有 size 属性的情况
+   */
+  private getElementSize(element: CanvasElement): { x: number; y: number } {
+    // 如果元素有 size 属性，直接使用
+    if (element.size && element.size.x !== undefined && element.size.y !== undefined) {
+      return { x: element.size.x, y: element.size.y }
+    }
+
+    // LINE 和 ARROW：从 points 属性计算
+    if (element.type === 'line' || element.type === 'arrow') {
+      const points = (element as any).points
+      if (points && points.length >= 2) {
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+        for (const p of points) {
+          minX = Math.min(minX, p.x)
+          maxX = Math.max(maxX, p.x)
+          minY = Math.min(minY, p.y)
+          maxY = Math.max(maxY, p.y)
+        }
+        return { x: maxX - minX || 1, y: maxY - minY || 1 }
+      }
+    }
+
+    // TEXT：使用 fontSize 估算
+    if (element.type === 'text') {
+      const fontSize = (element as any).fontSize || 16
+      return { x: fontSize * 10, y: fontSize * 1.5 }
+    }
+
+    // 默认返回小尺寸
+    return { x: 50, y: 50 }
+  }
+
+  /**
    * 渲染单个元素
    * 注意：此时 ctx 已经被 applyTransform 处理过，应该直接使用虚拟坐标
    */
@@ -560,13 +596,16 @@ export class Renderer {
     if (!element.visible) {
       return
     }
-    
+
+    // 安全获取元素尺寸
+    const size = this.getElementSize(element)
+
     // 直接使用虚拟坐标，applyTransform 会自动处理变换
     const x = element.position.x
     const y = element.position.y
-    const width = element.size.x
-    const height = element.size.y
-    
+    const width = size.x
+    const height = size.y
+
     // LOD 优化：极低细节级别时，跳过太小的元素
     // 需要手动计算屏幕尺寸来判断
     const scale = this.viewportManager.getViewport().scale
@@ -670,9 +709,10 @@ export class Renderer {
     element: CanvasElement,
     version: string
   ): { canvas: HTMLCanvasElement; version: string } {
-    // 使用元素自身的尺寸作为离屏画布尺寸（虚拟坐标系）
-    const width = Math.max(1, Math.round(element.size.x || 1))
-    const height = Math.max(1, Math.round(element.size.y || 1))
+    // 使用 getElementSize 安全获取尺寸
+    const size = this.getElementSize(element)
+    const width = Math.max(1, Math.round(size.x || 1))
+    const height = Math.max(1, Math.round(size.y || 1))
 
     const offscreen = document.createElement('canvas')
     offscreen.width = width
@@ -864,8 +904,9 @@ export class Renderer {
     const text = element.data?.text
     if (!text) return
 
-    const width = element.size.x
-    const height = element.size.y
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const textStyle = element.data?.textStyle || {}
 
     // 设置文字样式
@@ -1076,8 +1117,9 @@ export class Renderer {
    * 渲染图片元素
    */
   private renderImageElement(element: CanvasElement): void {
-    const width = element.size.x
-    const height = element.size.y
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     
     // 更新ImageRenderer的视口信息
     const viewport = this.viewportManager.getViewport()
@@ -1182,8 +1224,9 @@ export class Renderer {
     this.ctx.textBaseline = 'middle'
 
     // 计算文字位置（相对于图片的百分比位置）
-    const textX = element.size.x * overlayText.position.x
-    const textY = element.size.y * overlayText.position.y
+    const size = this.getElementSize(element)
+    const textX = size.x * overlayText.position.x
+    const textY = size.y * overlayText.position.y
 
 
     // 绘制文字
@@ -1491,9 +1534,10 @@ export class Renderer {
    */
   private renderShapePreview(element: CanvasElement): void {
     if (!this.previewCtx) return
-    
-    const width = element.size.x
-    const height = element.size.y
+
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const style = element.style
 
     this.applyElementStyle(style)
@@ -1515,8 +1559,9 @@ export class Renderer {
    */
   private renderTextPreview(element: CanvasElement): void {
     if (!this.previewCtx) return
-    
-    const width = element.size.x
+
+    const size = this.getElementSize(element)
+    const width = size.x
     const style = element.style
 
     // 应用元素样式
@@ -1604,9 +1649,10 @@ export class Renderer {
    */
   private renderImagePreview(element: CanvasElement): void {
     if (!this.previewCtx) return
-    
-    const width = element.size.x
-    const height = element.size.y
+
+    const size = this.getElementSize(element)
+    const width = size.x
+    const height = size.y
     const image = element.data?.image
 
     if (image) {

@@ -459,12 +459,18 @@ const handleColorChange = (layerId: string, color: string) => {
 // 生成缓存键
 const generateCacheKey = (layer: Layer): string => {
   if (!props.elements) return `${layer.id}-${layer.visible ? 'v' : 'h'}-${layer.color || ''}-no-elements`
-  
+
   // 获取该图层的元素
   const layerElements = props.elements.filter(el => el.layer === layer.id)
   const elementIds = layerElements.map(el => el.id).sort().join(',')
-  const elementHashes = layerElements.map(el => `${el.id}-${el.type}-${el.position.x}-${el.position.y}-${el.size.x}-${el.size.y}`).join(',')
-  
+  const elementHashes = layerElements.map(el => {
+    const sizeX = el.size?.x ?? 0
+    const sizeY = el.size?.y ?? 0
+    const posX = el.position?.x ?? 0
+    const posY = el.position?.y ?? 0
+    return `${el.id}-${el.type}-${posX}-${posY}-${sizeX}-${sizeY}`
+  }).join(',')
+
   return `${layer.id}-${layer.visible ? 'v' : 'h'}-${layer.color || ''}-${elementIds}-${elementHashes.length}`
 }
 
